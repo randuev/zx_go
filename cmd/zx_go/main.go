@@ -985,7 +985,26 @@ func newEmulator(model roms.SpectrumModel) (*emulator, error) {
 
 	// Initialize audio unless --no-sound was passed
 	if cliFlagsActive == nil || !cliFlagsActive.noSound {
-		ula.EnableAudio()
+		if cliFlagsActive != nil && cliFlagsActive.headless && cliFlagsActive.recordAudio != "" {
+			// Headless + recording: never touch the audio device. A silent
+			// mixer pumped once per executed frame captures the exact mix
+			// in EMULATED time. Even if oto manages to open something here,
+			// its playback goroutine would race the frame-loop consumer for
+			// the queue and stretch the capture toward wall-clock — the
+			// WAV must have a single owner, and in headless that's the pump.
+			ula.EnableAudioSilent()
+			slog.Info("headless: silent mixer enabled for --record-audio", "path", cliFlagsActive.recordAudio)
+		} else {
+			ula.EnableAudio()
+			// No sound card (CI container, muted VM): oto failed, but if the
+			// run asked for --record-audio, run the mixer WITHOUT a device
+			// so the WAV still captures the exact mixed stream. render()
+			// flushes+pumps it at the GUI's 50 Hz even with no speaker.
+			if !ula.AudioHasDevice() && cliFlagsActive != nil && cliFlagsActive.recordAudio != "" {
+				ula.EnableAudioSilent()
+				slog.Info("audio device unavailable — silent mixer enabled for --record-audio", "path", cliFlagsActive.recordAudio)
+			}
+		}
 		configureAudioExtras(ula)
 	} else {
 		slog.Info("--no-sound: audio disabled")
@@ -2327,9 +2346,9 @@ func installTapeTrap(emu *emulator) {
 			if tp != nil {
 				blk, more = tp.CurrentBlock(), tp.HasMoreBlocks()
 			}
-			fmt.Fprintf(os.Stderr, "[tapetrap] @0556 model=%s bank=%d active=%v tp=%v block=%d more=%v A=%02X carry=%v\n",
+			fmt.Fprintf(os.Stderr, "[tapetrap] @0556 model=%s bank=%d active=%v tp=%v block=%d more=%v A=%02X carry=%v IX=%04X DE=%04X\n",
 				roms.GetModelName(emu.mem.GetCurrentModel()), emu.mem.GetROMBank(),
-				tapeTrapROMActive(emu.mem), tp != nil, blk, more, emu.cpu.A, emu.cpu.F&z80.FLAG_C != 0)
+				tapeTrapROMActive(emu.mem), tp != nil, blk, more, emu.cpu.A, emu.cpu.F&z80.FLAG_C != 0, emu.cpu.IX, uint16(emu.cpu.D)<<8|uint16(emu.cpu.E))
 		}
 		// Fire only when the 48 BASIC ROM — which holds LD-BYTES at $0556 — is
 		// the ROM currently paged at $0000. That's always true on the 48K; on
@@ -4093,6 +4112,12 @@ func main() {
 						// We only need the path; close the writer and open
 						// our own file inside the audio package.
 						_ = writer.Close()
+						// No sound card? Attach the silent mixer now so the
+						// recording still runs — render() flushes+pumps it at
+						// 50 Hz on the GUI path even with nothing to play to.
+						if !emu.ula.AudioHasDevice() {
+							emu.ula.EnableAudioSilent()
+						}
 						if err := emu.ula.StartRecording(path); err != nil {
 							dialog.ShowError(fmt.Errorf("failed to start recording: %w", err), w)
 							return

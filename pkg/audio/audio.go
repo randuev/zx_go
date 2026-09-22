@@ -126,6 +126,19 @@ type AudioSystem struct {
 	recFile    *os.File
 	recSamples uint64
 	recScratch []byte
+
+	// silent marks a mixer with no oto output device: nothing is played and
+	// the oto playback goroutine never pulls. PumpFrames — called once per
+	// executed frame by the emulator's frame loop — becomes the sole
+	// consumer of audioReader.Read, so the mix (beeper events, AY, DAC) and
+	// the WAV recorder still run on a machine with no sound card, or in
+	// headless mode where there is no audio context at all.
+	silent bool
+
+	// pumpBuf is PumpFrames' scratch buffer: it receives the little-endian
+	// bytes of each pumped frame, which are discarded — the recording was
+	// already written from the int16 mix inside Read.
+	pumpBuf []byte
 }
 
 // audioReader implements io.Reader on the oto playback goroutine.
@@ -181,6 +194,58 @@ func New() (*AudioSystem, error) {
 	as.prefillSilence()
 	as.player = ctx.NewPlayer(as.reader)
 	return as, nil
+}
+
+// NewSilent creates an AudioSystem with NO oto output device — the
+// headless / no-sound-card variant. The whole mix pipeline (beeper event
+// synthesis, AY and DAC mixing, WAV recording) runs identically to the
+// device-backed New(); the only difference is who calls audioReader.Read:
+// instead of the oto playback goroutine pulling at device rate, the
+// emulator's frame loop calls PumpFrames once per executed frame, so the
+// WAV advances in emulated time whether or not a sound card exists.
+//
+// Returns *AudioSystem directly (never errors): there is no device to fail.
+func NewSilent() *AudioSystem {
+	as := &AudioSystem{keepAlive: 0, silent: true}
+	as.reader = &audioReader{
+		audioSys:  as,
+		buffer:    make([]byte, BufferSize*ChannelCount*2),
+		mixBuffer: make([]int16, BufferSize*ChannelCount),
+		ditherRNG: 0x9E3779B9,
+	}
+	// No prefill cushion: PumpFrames consumes exactly the one frame each
+	// flushAudioFrame push produced, one-for-one. The cushion that keeps a
+	// real device from starving would only surface in the WAV as leading
+	// silence here — and silence is what an empty queue emits anyway.
+	as.queueHead, as.queueTail, as.queueSize = 0, 0, 0
+	as.lastL, as.lastR = 0, 0
+	return as
+}
+
+// IsSilent reports whether this system runs without an output device and
+// must be driven by PumpFrames (see NewSilent).
+func (as *AudioSystem) IsSilent() bool { return as.silent }
+
+// PumpFrames consumes n emulated frames of audio from the mixer without an
+// output device, running the same Read path the oto goroutine would: pop
+// the beeper frame the ULA pushed this frame, mix AY + DAC at sample rate,
+// append to any active WAV recording. The emitted little-endian bytes go
+// into a scratch buffer and are discarded — there is no speaker on the
+// other end; the WAV is the point.
+//
+// Frames are pumped whole (SamplesPerFrame stereo frames at a time) to stay
+// frame-aligned with the producer; popping a partial frame would desync the
+// queue against every future flush.
+func (as *AudioSystem) PumpFrames(frames int) {
+	if frames <= 0 || as.reader == nil {
+		return
+	}
+	if len(as.pumpBuf) == 0 {
+		as.pumpBuf = make([]byte, SamplesPerFrame*ChannelCount*2)
+	}
+	for i := 0; i < frames; i++ {
+		_, _ = as.reader.Read(as.pumpBuf)
+	}
 }
 
 // prefillSilence seeds the ring buffer with queuePrefill silent
@@ -350,8 +415,12 @@ func (ar *audioReader) Read(p []byte) (n int, err error) {
 	return bytesToRead, nil
 }
 
-// Start begins audio output.
+// Start begins audio output. A silent system (NewSilent) has no player and
+// no device — there is nothing to start, and the frame loop pumps it.
 func (as *AudioSystem) Start() error {
+	if as.player == nil {
+		return nil
+	}
 	as.player.Play()
 	return nil
 }
@@ -401,6 +470,15 @@ func (as *AudioSystem) Close() error {
 // doesn't start with stale audio in the buffer AND immediately
 // benefits from the same cushion that startup gets.
 func (as *AudioSystem) Reset() {
+	if as.silent {
+		// Pump-driven systems keep the queue empty by construction; an
+		// 80 ms silence cushion would land mid-recording on every reboot.
+		as.queueMu.Lock()
+		as.queueHead, as.queueTail, as.queueSize = 0, 0, 0
+		as.lastL, as.lastR = 0, 0
+		as.queueMu.Unlock()
+		return
+	}
 	as.prefillSilence()
 }
 

@@ -6,6 +6,22 @@ project targets [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`--record-audio` now works with no sound card, headless included.** A
+  headless run with `--record-audio` attaches a silent mixer
+  (`audio.NewSilent`) instead of an oto device — no ALSA, no `/dev/snd`, no
+  X — and the frame loop pumps it exactly once per executed frame
+  (`ULA.PumpAudioFrame`), so the WAV advances in guest T-state time. The
+  oto path is skipped entirely in this mode: `oto.NewContext` can succeed
+  without any audible sink (as it does in containers), and its playback
+  goroutine would otherwise race the WAV consumer and truncate the capture
+  to wall-clock. A zero-elapsed-T-state guard in `flushAudioFrame` makes
+  double-render paths (screenshot probes, debugger views) safe. In the GUI,
+  choosing "Start Recording (WAV)" on a machine without an audio device now
+  transparently falls back to the same silent mixer. `ZX_GO_AUDIO_DEBUG=1`
+  logs pump accounting (`pumps/guard_skips/pushes`) for diagnostics.
+
 ## [v1.12.3]
 
 **Backlog work, and two corrections to v1.12.2's own changes.**

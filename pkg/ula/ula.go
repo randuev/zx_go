@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"log"
+	"os"
 	"sync/atomic"
 
 	"github.com/conorarmstrong/zx_go/pkg/audio"
@@ -2274,6 +2275,61 @@ func (u *ULA) EnableAudio() {
 	}
 }
 
+// EnableAudioSilent attaches a mixer with no output device (audio.NewSilent).
+// Used when there is no sound card (headless runs, CI containers) but audio
+// is still wanted — so --record-audio captures the exact mixed stream the
+// emulator would have played. The mixer is frame-driven: the caller must
+// call PumpAudioFrame once per executed frame, or the audio pipeline stays
+// dark just like the disabled state.
+func (u *ULA) EnableAudioSilent() {
+	if u.audio != nil {
+		return
+	}
+	u.audio = audio.NewSilent()
+	// Same AY preference as EnableAudio — Next's multi-chip engine first.
+	// Reset() re-attaches too, so a later model switch stays wired.
+	if u.nextAY != nil {
+		u.audio.SetAY(u.nextAY)
+	} else if u.ay != nil {
+		u.audio.SetAY(u.ay)
+	}
+}
+
+// AudioHasDevice reports whether a mixer with a real output device is
+// attached. False when audio is disabled or running silent (no sound card).
+func (u *ULA) AudioHasDevice() bool {
+	return u.audio != nil && !u.audio.IsSilent()
+}
+
+// PumpAudioFrame flushes the finished frame's audio events into the mixer and
+// — when the mixer has no device — drains exactly one audio frame through the
+// mix pipeline (beeper synthesis, AY/DAC mix, WAV record). Call once per
+// executed frame from loop-less hosts (headless) where render() does not run
+// every frame and no oto goroutine exists to consume. A no-op with audio
+// disabled or a real device attached (the oto goroutine owns the queue then).
+func (u *ULA) PumpAudioFrame() {
+	if u.audio == nil || !u.audio.IsSilent() {
+		return
+	}
+	if os.Getenv("ZX_GO_AUDIO_DEBUG") != "" {
+		pumpDbg.pumps.Add(1)
+	}
+	u.flushAudioFrame()
+}
+
+// PumpDebugPumps / PumpDebugSkips / PumpDebugPushes expose the silent-mixer
+// pump tally (see ZX_GO_AUDIO_DEBUG).
+func PumpDebugPumps() int64  { return pumpDbg.pumps.Load() }
+func PumpDebugSkips() int64  { return pumpDbg.skips.Load() }
+func PumpDebugPushes() int64 { return pumpDbg.pushes.Load() }
+
+// pumpDbg is a temporary diagnostic tally for silent-mixer pump accounting.
+var pumpDbg struct {
+	pumps atomic.Int64
+	skips atomic.Int64
+	pushes atomic.Int64
+}
+
 // SetPeripherals sets the peripheral manager for I/O port delegation
 func (u *ULA) SetPeripherals(pm *peripherals.PeripheralManager) {
 	u.peripherals = pm
@@ -2440,10 +2496,28 @@ func (u *ULA) flushAudioFrame() {
 	if u.audio == nil {
 		return
 	}
+	// Zero-time double-flush guard: render() can be called twice at the same
+	// frame boundary (headless screenshot + the every-frame pump, a debugger
+	// view, a CRT re-composite). A second flush with no T-states elapsed since
+	// the last would push a phantom silent frame — doubling the WAV length
+	// when a silent mixer is being pumped. No elapsed time means nothing new
+	// happened, so emit nothing.
+	if u.mem != nil && u.mem.TStates != nil && *u.mem.TStates == u.frameStartTstate {
+		if os.Getenv("ZX_GO_AUDIO_DEBUG") != "" {
+			n := pumpDbg.skips.Add(1)
+			if n <= 60 {
+				log.Printf("[audio] flush-guard-skip n=%d tstate=%d fastLoad=%v", n, *u.mem.TStates, u.fastLoad)
+			}
+		}
+		return
+	}
 	// During fast-tape turbo, many emulated frames collapse into this single
 	// audio frame, so the reconstructed waveform is garbled. Emit silence and
 	// re-arm the DC blocker so normal audio resumes cleanly once loading ends.
 	if u.fastLoad {
+		if os.Getenv("ZX_GO_AUDIO_DEBUG") != "" {
+			pumpDbg.pushes.Add(1)
+		}
 		u.audioEvents = u.audioEvents[:0]
 		u.tapeAudioEvents = u.tapeAudioEvents[:0]
 		u.frameStartTapeState = false
@@ -2453,11 +2527,25 @@ func (u *ULA) flushAudioFrame() {
 		if u.mem.TStates != nil {
 			u.frameStartTstate = *u.mem.TStates
 		}
+		u.pumpSilentMixer()
 		return
+	}
+	if os.Getenv("ZX_GO_AUDIO_DEBUG") != "" {
+		pumpDbg.pushes.Add(1)
 	}
 	u.audio.PushStereoSamples(u.mixAudioFrame())
 	if u.mem.TStates != nil {
 		u.frameStartTstate = *u.mem.TStates
+	}
+	u.pumpSilentMixer()
+}
+
+// pumpSilentMixer drains one emulated frame of audio through the mix when no
+// output device exists (see audio.NewSilent). With a device attached the oto
+// playback goroutine is the consumer and this must not steal its samples.
+func (u *ULA) pumpSilentMixer() {
+	if u.audio != nil && u.audio.IsSilent() {
+		u.audio.PumpFrames(1)
 	}
 }
 

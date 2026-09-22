@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/conorarmstrong/zx_go/pkg/roms"
+	"github.com/conorarmstrong/zx_go/pkg/ula"
 	"github.com/conorarmstrong/zx_go/pkg/z80"
 )
 
@@ -970,6 +971,10 @@ func runHeadless(f *cliFlags) {
 			}
 			rdbg.WaitIfPaused()
 			runOneFrameHeadless(emu, model)
+			// Drive the silent mixer once per executed frame so --record-audio
+			// works with no sound card (no-op when audio is off or a real
+			// device owns the queue). See ULA.PumpAudioFrame.
+			emu.ula.PumpAudioFrame()
 			if os.Getenv("ZX_GO_RENDER_EVERY_FRAME") != "" {
 				emu.renderFrame() // GUI-parity probe
 			}
@@ -980,6 +985,17 @@ func runHeadless(f *cliFlags) {
 		slog.Info("headless run complete", "frames", f.frames,
 			"pc", emu.cpu.PC, "insns", emu.cpu.InstructionCount(),
 			"int_fires", z80.IntFireCount)
+		if err := emu.ula.StopRecording(); err != nil {
+			slog.Error("--record-audio: finalise failed", "path", f.recordAudio, "err", err)
+		} else if f.recordAudio != "" {
+			slog.Info("--record-audio: WAV finalised", "path", f.recordAudio)
+			if os.Getenv("ZX_GO_AUDIO_DEBUG") != "" {
+				slog.Info("audio-pump-tally",
+					"pumps", ula.PumpDebugPumps(),
+					"guard_skips", ula.PumpDebugSkips(),
+					"pushes", ula.PumpDebugPushes())
+			}
+		}
 		emu.flushSDWriteback()
 		if provHost != nil {
 			provHost.logEndOfRunProvenance()
@@ -999,6 +1015,7 @@ func runHeadless(f *cliFlags) {
 		for {
 			rdbg.WaitIfPaused()
 			runOneFrameHeadless(emu, model)
+			emu.ula.PumpAudioFrame() // see the counted loop above
 			if os.Getenv("ZX_GO_RENDER_EVERY_FRAME") != "" {
 				emu.renderFrame() // GUI-parity probe
 			}
