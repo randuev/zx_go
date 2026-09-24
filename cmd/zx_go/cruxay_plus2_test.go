@@ -4,8 +4,8 @@ import (
 	"encoding/binary"
 	"fmt"
 	"os"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -226,7 +226,7 @@ func TestCruxayPlus2Run(t *testing.T) {
 				cntFlip++
 			case pc >= 0x8660 && pc <= 0x8693:
 				cntBP++
-			case pc >= sym("kfull",0x8995) && pc <= sym("kfull",0x8995)+0x25:
+			case pc >= sym("kfull", 0x8995) && pc <= sym("kfull", 0x8995)+0x25:
 				cntKfull++
 			}
 		})
@@ -280,10 +280,10 @@ func TestCruxayPlus2Run(t *testing.T) {
 				continue
 			}
 			rdbg.WaitIfPaused()
+			rdbg.TapTick() // advance `key … tap` frame countdowns
 			runOneFrameHeadless(emu, roms.ModelPlus2)
 		}
 	}
-
 
 	fcntAddr := sym("fcnt", 0x8A0A)
 	bbufAddr := sym("bbuf", 0x8A14)
@@ -302,6 +302,10 @@ func TestCruxayPlus2Run(t *testing.T) {
 	stepSeen := map[[2]byte]int{}
 	prevMel := byte(0xFF)
 	melChanges := 0
+	var melTrace [][4]int
+	if os.Getenv("CRUXAY_MELTRACE") == "1" {
+		melTrace = make([][4]int, 0, 1024)
+	}
 	ayPoll := func() {
 		ay := emu.ula.AY()
 		if ay == nil {
@@ -324,6 +328,15 @@ func TestCruxayPlus2Run(t *testing.T) {
 			melChanges++
 		}
 		prevMel = emu.mem.Read(sym("wcnt", 0x8A10))
+		// CRUXAY_MELTRACE: record per-frame (wstep, chA, chB, chC) periods
+		// so the Waltzing Matilda contour can be verified directly from the
+		// chip register stream — immune to square-wave harmonic leakage.
+		if melTrace != nil {
+			pa := int(ay.ReadRegister(0)) | int(ay.ReadRegister(1))<<8
+			pb := int(ay.ReadRegister(2)) | int(ay.ReadRegister(3))<<8
+			pc := int(ay.ReadRegister(4)) | int(ay.ReadRegister(5))<<8
+			melTrace = append(melTrace, [4]int{int(wstep), pa, pb, pc})
+		}
 	}
 	// v14 hardware-faithful criteria: paintbuf's full clear+paint runs
 	// with DI held (a flip must never tear mid-paint), so vsyncs are
@@ -355,8 +368,8 @@ func TestCruxayPlus2Run(t *testing.T) {
 	// relaunching.
 	var pcRing [32768]uint16
 	var pcIdx int
-	gwr := make([]string,0,64)
-isrVisits := []string{}
+	gwr := make([]string, 0, 64)
+	isrVisits := []string{}
 	traceOn := false
 	samplePC := func(pc uint16) string { return fmt.Sprintf("%04X", pc) }
 	var startSeq []string
@@ -376,7 +389,9 @@ isrVisits := []string{}
 			isrVisits = append(isrVisits, samplePC(pc))
 		}
 		if traceOn && (pc < 0x8000 || pc > 0x8FFF) {
-			for _, q := range startSeq { _ = q }
+			for _, q := range startSeq {
+				_ = q
+			}
 		}
 		if !trailSaved && (pc < 0x8000 || pc > 0x8FFF) {
 			copy(savedRing[:], pcRing[:])
@@ -454,7 +469,7 @@ isrVisits := []string{}
 			if firstQuitFrame < 0 {
 				firstQuitFrame = i
 			}
-		} else if pc >= sym("kfull",0x8995) && pc <= sym("kfull",0x8995)+0x25 {
+		} else if pc >= sym("kfull", 0x8995) && pc <= sym("kfull", 0x8995)+0x25 {
 			kfullHits++
 		}
 		fc := int(emu.mem.Read(fcntAddr))
@@ -530,7 +545,7 @@ isrVisits := []string{}
 			n7 := litBytes(emu, 7)
 			t.Logf("f=%3d PC=$%04X IFF1=%v IM=%d I=$%02X SP=$%04X ScreenPage=%d fcnt=%d bbuf=%d bcol=%d grace=%d litB5=%d litB7=%d pgwrites=%d",
 				i, emu.cpu.PC, emu.cpu.IFF1, emu.cpu.IM, emu.cpu.I, emu.cpu.SP, emu.mem.ScreenPage, fc, bb,
-				emu.mem.Read(sym("bcol",0x8A0F)), emu.mem.Read(sym("grace",0x8A06)), n5, n7, len(pgw))
+				emu.mem.Read(sym("bcol", 0x8A0F)), emu.mem.Read(sym("grace", 0x8A06)), n5, n7, len(pgw))
 		}
 	}
 	t.Logf("RESULT intFrames(changed fcnt)=%d flips(bbuf)=%d isrHits=%d loopHits=%d pgwrites=%d pgDropped=%d maxB7=%d pages=%v quitHits=%d@f%d romHits=%d@f%d kfullHits=%d",
@@ -540,6 +555,16 @@ isrVisits := []string{}
 		nv := [3]int{}
 		for ch := 0; ch < 3; ch++ {
 			nv[ch] = len(volSeen[ch])
+		}
+		if melTrace != nil {
+			f, _ := os.Create("/tmp/cruxay_meltrace.txt")
+			if f != nil {
+				for _, r := range melTrace {
+					fmt.Fprintf(f, "%d %d %d %d\n", r[0], r[1], r[2], r[3])
+				}
+				f.Close()
+				t.Logf("CRUXAY_MELTRACE: %d frames -> /tmp/cruxay_meltrace.txt", len(melTrace))
+			}
 		}
 		t.Logf("AY-CENSUS nil=%v volA=%v volB=%v volC=%v toneActiveFrames A/B/C=%d/%d/%d waltzStates=%d melwcntChanges=%d",
 			ayNil, sortedVolKeys(volSeen[0]), sortedVolKeys(volSeen[1]), sortedVolKeys(volSeen[2]),
@@ -614,9 +639,9 @@ isrVisits := []string{}
 		}
 		t.Log(msg)
 	}
-	t.Logf("ISRSEQ %s", strings.Join(isrVisits," "))
+	t.Logf("ISRSEQ %s", strings.Join(isrVisits, " "))
 	if traceOn {
-		t.Logf("STARTSEQ %s", strings.Join(startSeq," "))
+		t.Logf("STARTSEQ %s", strings.Join(startSeq, " "))
 	}
 	for _, g := range gwr {
 		t.Logf("GWR %s", g)
@@ -641,7 +666,7 @@ isrVisits := []string{}
 			dsp = 7
 		}
 		hd0 := emu.mem.RAM8KPage(dsp * 2)
-		hd1 := emu.mem.RAM8KPage(dsp*2+1)[:0x1400]
+		hd1 := emu.mem.RAM8KPage(dsp*2 + 1)[:0x1400]
 		rd := func(off int) byte {
 			if off < 0x2000 {
 				return hd0[off]
@@ -750,7 +775,7 @@ func starWindow(emu *emulator, bank, cx, cy int) int {
 			if x < 0 || x >= 256 {
 				continue
 			}
-			off := ((y&7)<<8) + ((y&0x38)<<2) + ((y&0xC0)<<5) + (x >> 3)
+			off := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + (x >> 3)
 			bit := byte(0x80 >> (x & 7))
 			if rd(off)&bit != 0 {
 				n++
