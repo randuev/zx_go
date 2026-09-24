@@ -365,6 +365,56 @@ type remoteDebugger struct {
 	// corrupt-stack trap. Always allocated (the table is the
 	// zero-value); enabling only flips the hot-path gate.
 	provenance provenanceTracker
+
+	// keyTaps are frame-counted key injections armed by `key NAME tap
+	// [FRAMES]`. TapTick — called once per executed frame by the
+	// headless loop and the GUI ticker, right after WaitIfPaused —
+	// decrements each entry and releases the matrix bit at zero. The
+	// countdown is on the MACHINE's frame clock, not wall time, so a
+	// tap stays the intended length in guest-time even when headless
+	// runs far faster (or slower) than real time, and a paused CPU
+	// simply holds the key until frames resume. tapMu guards the
+	// slice: cmdKey writes it from the connection goroutine, TapTick
+	// from the frame goroutine.
+	keyTaps []keyTap
+	tapMu   sync.Mutex
+}
+
+// keyTap is one pending matrix-bit release for `key … tap [FRAMES]`.
+// Multiple bits coexist (a chord taps every bit with the same frame
+// budget, so BREAK releases both halves on the same tick).
+type keyTap struct {
+	row    int
+	mask   byte
+	frames int
+}
+
+// TapTick advances every armed key tap by one executed frame,
+// releasing the matrix bits whose countdown reaches zero. Nil-safe
+// (mirrors WaitIfPaused) so every frame loop may call it
+// unconditionally.
+func (d *remoteDebugger) TapTick() {
+	if d == nil {
+		return
+	}
+	d.tapMu.Lock()
+	if len(d.keyTaps) == 0 {
+		d.tapMu.Unlock()
+		return
+	}
+	kept := d.keyTaps[:0]
+	for _, t := range d.keyTaps {
+		t.frames--
+		if t.frames > 0 {
+			kept = append(kept, t)
+			continue
+		}
+		if d.emu != nil && d.emu.kbd != nil {
+			d.emu.kbd.PressMatrixKey(t.row, t.mask, false)
+		}
+	}
+	d.keyTaps = kept
+	d.tapMu.Unlock()
 }
 
 // newRemoteDebugger spins up the TCP listener and registers the
@@ -945,7 +995,7 @@ func (d *remoteDebugger) handleCommand(line string) string {
 	case "help", "?":
 		return "OK [step-back walks the recorded M1 ring: instant, registers only, NO memory. " +
 			"replay-back re-executes from a tt-on checkpoint: the whole machine, memory included.] " +
-			"pause set-pause-timeout break-on-sd continue step step-over step-back replay-back step-forward run-back to-present reverse-status get-registers get-stack backtrace history prev hot callgraph retgraph rstgraph get-memory hexdump read-memory write-memory set-breakpoint clear-breakpoint list-breakpoints bp-first-entry disassemble disasm-bank get-mmu get-divmmc nr-panel copper-disasm layer-state sprite-list palette-dump nextreg-read nextreg-write nr-snap nr-diff bank-peek bank-poke pool-scan load-bin list-banks watch-reg list-watches clear-watch watch-mem clear-watch-mem watch-read clear-watch-read watch-zero watch-port tp list-tp clear-tp nr-trace watch-nextreg trace-divmmc-ram trace-writes trace-nextreg-deltas irq-stats catch snapshot-on-bp compare-foreign crash-detect tt-on tt-off tt-status tt-snap tt-rewind tt-find-pc tt-clear quit"
+			"pause set-pause-timeout break-on-sd continue step step-over step-back replay-back step-forward run-back to-present reverse-status get-registers get-stack backtrace history prev hot callgraph retgraph rstgraph get-memory hexdump read-memory write-memory set-breakpoint clear-breakpoint list-breakpoints bp-first-entry disassemble disasm-bank get-mmu get-divmmc nr-panel copper-disasm layer-state sprite-list palette-dump nextreg-read nextreg-write nr-snap nr-diff bank-peek bank-poke pool-scan load-bin list-banks watch-reg list-watches clear-watch watch-mem clear-watch-mem watch-read clear-watch-read watch-zero watch-port tp list-tp clear-tp nr-trace watch-nextreg trace-divmmc-ram trace-writes trace-nextreg-deltas irq-stats catch key snapshot-on-bp compare-foreign crash-detect tt-on tt-off tt-status tt-snap tt-rewind tt-find-pc tt-clear quit"
 	case "set-pause-timeout":
 		// Query form (no arg) reports the current value; otherwise set
 		// the pause-ack wait to N seconds. Used to await a `continue`
@@ -1187,6 +1237,8 @@ func (d *remoteDebugger) handleCommand(line string) string {
 	case "nmi":
 		d.emu.cpu.PendingNMI.Store(true)
 		return "OK NMI armed (fires at next instruction boundary)"
+	case "key":
+		return d.cmdKey(args)
 	case "sym":
 		return d.cmdSym(args)
 	case "reload-syms":
@@ -1411,6 +1463,162 @@ func (d *remoteDebugger) cmdSetReg(args []string) string {
 		return "ERR unknown register " + name
 	}
 	return "OK"
+}
+
+// cmdKey implements `key` — remote injection of physical keyboard
+// presses into the host-side key matrix, the same mechanism
+// --press-key drives on a timer:
+//
+//	key release
+//	key NAME[+NAME…] [down|up|tap] [FRAMES]
+//	key ROW MASK   [down|up|tap] [FRAMES]   (ROW decimal 0..7, MASK hex $01..$1F)
+//
+// NAMEs use pressKeyMap — the identical table --press-key uses — so
+// `key enter tap` injects exactly what `--press-key enter@N` would.
+// Chords (`caps+space`, `sym+p`) press every named bit together.
+// `down`/`up` hold and lift the matrix bits indefinitely; `tap`
+// (default) presses and arms a release FRAMES executed frames later
+// (default 30 ≈ 0.6 s at 50 Hz, the --press-key hold length).
+// The countdown runs on the machine's frame clock via TapTick, so a
+// tap keeps its guest-visible length at any emulation speed, and a
+// paused CPU holds the press until frames resume rather than burning
+// the tap into a machine that cannot scan. Guests that poll
+// continuously (cruxay-style IN loops) see `down` on their next scan;
+// debouncing guests (NextZXOS menu nav) need the frames a tap
+// provides.
+func (d *remoteDebugger) cmdKey(args []string) string {
+	usage := "usage: key NAME[+NAME…]|ROW MASK [down|up|tap] [FRAMES] | key release"
+	if len(args) == 0 {
+		return "ERR " + usage
+	}
+	if d.emu == nil || d.emu.kbd == nil {
+		return "ERR key: no keyboard on this emulator"
+	}
+	if strings.EqualFold(args[0], "release") {
+		d.emu.kbd.ReleaseAll()
+		d.tapMu.Lock()
+		d.keyTaps = d.keyTaps[:0]
+		d.tapMu.Unlock()
+		return "OK keys released"
+	}
+	// Resolve the key operand: raw ROW MASK form when args[0] is a
+	// number, otherwise pressKeyMap name(s) with `+` chords.
+	type keyBit struct {
+		row  int
+		mask byte
+	}
+	var bits []keyBit
+	var rest []string
+	if row, e := strconv.Atoi(args[0]); e == nil {
+		if row < 0 || row > 7 {
+			return "ERR key: ROW must be 0..7"
+		}
+		if len(args) < 2 {
+			return "ERR key: raw form needs MASK ($01..$1F)"
+		}
+		m, e := parseHex8(args[1])
+		if e != nil || m == 0 || m > 0x1F {
+			return "ERR key: MASK must be $01..$1F"
+		}
+		bits = []keyBit{{row: row, mask: m}}
+		rest = args[2:]
+	} else {
+		for _, k := range strings.Split(strings.ToLower(args[0]), "+") {
+			mp, ok := pressKeyMap[strings.TrimSpace(k)]
+			if !ok {
+				return "ERR key: unknown key " + k + " (or use ROW MASK)"
+			}
+			bits = append(bits, keyBit{row: mp.row, mask: mp.mask})
+		}
+		rest = args[1:]
+	}
+	// Optional action, then optional frame count.
+	action := "tap"
+	if len(rest) > 0 {
+		switch strings.ToLower(rest[0]) {
+		case "down":
+			action = "down"
+			rest = rest[1:]
+		case "up":
+			action = "up"
+			rest = rest[1:]
+		case "tap":
+			rest = rest[1:]
+		}
+	}
+	frames := 30
+	if len(rest) > 0 {
+		n, e := strconv.Atoi(rest[0])
+		if e != nil || n < 1 || n > 3000 {
+			return "ERR key: FRAMES must be 1..3000"
+		}
+		frames = n
+		rest = rest[1:]
+	}
+	if len(rest) > 0 {
+		return "ERR " + usage
+	}
+	operand := strings.ToLower(args[0])
+	switch action {
+	case "down":
+		for _, b := range bits {
+			d.emu.kbd.PressMatrixKey(b.row, b.mask, true)
+		}
+		return "OK key down " + operand
+	case "up":
+		for _, b := range bits {
+			d.emu.kbd.PressMatrixKey(b.row, b.mask, false)
+		}
+		d.tapMu.Lock()
+		kept := d.keyTaps[:0]
+		for _, t := range d.keyTaps {
+			drop := false
+			for _, b := range bits {
+				if t.row == b.row && t.mask&b.mask != 0 {
+					drop = true
+				}
+			}
+			if !drop {
+				kept = append(kept, t)
+			}
+		}
+		d.keyTaps = kept
+		d.tapMu.Unlock()
+		return "OK key up " + operand
+	case "tap":
+		for _, b := range bits {
+			d.emu.kbd.PressMatrixKey(b.row, b.mask, true)
+		}
+		d.tapMu.Lock()
+		for _, b := range bits {
+			rearmed := false
+			for i := range d.keyTaps {
+				if d.keyTaps[i].row == b.row && d.keyTaps[i].mask == b.mask {
+					d.keyTaps[i].frames = frames // re-arm: latest tap wins
+					rearmed = true
+					break
+				}
+			}
+			if !rearmed {
+				d.keyTaps = append(d.keyTaps, keyTap{row: b.row, mask: b.mask, frames: frames})
+			}
+		}
+		d.tapMu.Unlock()
+		if d.paused.Load() {
+			return fmt.Sprintf("OK key tap %s %df held (CPU paused — release lands when frames resume)", operand, frames)
+		}
+		return fmt.Sprintf("OK key tap %s %df", operand, frames)
+	}
+	return "ERR " + usage
+}
+
+// parseHex8 parses a byte-sized hex argument ($FF, 0xFF, FF).
+func parseHex8(s string) (byte, error) {
+	v, err := strconv.ParseUint(strings.TrimPrefix(strings.TrimPrefix(strings.ToLower(s), "$"), "0x"), 16, 8)
+	if err != nil {
+		return 0, err
+	}
+	return byte(v), nil
 }
 
 // bpset returns the shared breakpoint store, lazily allocating one

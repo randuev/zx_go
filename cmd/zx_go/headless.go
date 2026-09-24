@@ -970,6 +970,7 @@ func runHeadless(f *cliFlags) {
 				}
 			}
 			rdbg.WaitIfPaused()
+			rdbg.TapTick() // advance `key … tap` frame countdowns (nil-safe)
 			runOneFrameHeadless(emu, model)
 			// Drive the silent mixer once per executed frame so --record-audio
 			// works with no sound card (no-op when audio is off or a real
@@ -1014,6 +1015,7 @@ func runHeadless(f *cliFlags) {
 			"frames", "unlimited")
 		for {
 			rdbg.WaitIfPaused()
+			rdbg.TapTick() // advance `key … tap` frame countdowns (nil-safe)
 			runOneFrameHeadless(emu, model)
 			emu.ula.PumpAudioFrame() // see the counted loop above
 			if os.Getenv("ZX_GO_RENDER_EVERY_FRAME") != "" {

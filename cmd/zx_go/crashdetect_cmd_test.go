@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/conorarmstrong/zx_go/pkg/keyboard"
 	"github.com/conorarmstrong/zx_go/pkg/memory"
 	"github.com/conorarmstrong/zx_go/pkg/roms"
 	"github.com/conorarmstrong/zx_go/pkg/z80"
@@ -21,7 +22,7 @@ func newRemoteWithCPU(t *testing.T) *remoteDebugger {
 		t.Fatalf("memory.New: %v", err)
 	}
 	cpu := z80.New(mem, nil)
-	return &remoteDebugger{emu: &emulator{cpu: cpu, mem: mem}}
+	return &remoteDebugger{emu: &emulator{cpu: cpu, mem: mem, kbd: keyboard.New()}}
 }
 
 func TestCmdCrashDetect_StatusAndUnknown(t *testing.T) {

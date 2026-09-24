@@ -555,6 +555,14 @@ Any command that moves the machine (`continue`, `step`, `step-over`, `forward`, 
 | `sym $ADDR NAME` / `sym clear $ADDR` / `sym` | — | Add, remove, or list symbol-map entries at runtime. Naming an address mid-session makes it appear in subsequent `disasm` / `prev` / `regs` annotations without restarting. `sym` with no args lists every loaded symbol, address-sorted. |
 | `reload-syms PATH` | — | Re-read PATH as a symbol-map file, replacing the in-memory table. Use after editing the file mid-session. |
 
+#### Keyboard injection
+
+| Command | Aliases | Purpose |
+| --- | --- | --- |
+| `key NAME [down\|up\|tap] [FRAMES]` | — | Inject a physical key press into the host key matrix — the same bits `--press-key` drives on a timer. NAME uses the identical pressKeyMap table (`caps`, `z`, `enter`, `space`, `sym`, …); chords via `+` (`key caps+space tap` = BREAK, pressed together). `down`/`up` hold and lift indefinitely; `tap` (default) presses and releases FRAMES executed frames later (default 30 ≈ 0.6 s — the --press-key hold length). The countdown runs on the MACHINE's frame clock (TapTick in every frame loop), so a tap keeps its guest-visible length at any emulation speed, and a paused CPU holds the press until frames resume instead of burning it into a machine that cannot scan. Polling guests see `down` on their next scan; debouncing guests (NextZXOS menu nav) need the frames a tap provides. | `OK key tap enter 30f` |
+| `key ROW MASK [down\|up\|tap] [FRAMES]` | — | Raw matrix form: ROW decimal 0..7 (row 0 = caps/Z/X/C/V), MASK hex `$01..$1F`, bit 0 = leftmost column. Reaches any bit the name table lacks, and multi-bit masks press a whole group. | `OK key down 0 $1F` |
+| `key release` | — | Lift every key and cancel every pending tap (stuck-key recovery after a `down` you forgot to lift, the telnet analogue of the GUI focus-loss reset). | `OK keys released` |
+
 #### Breakpoints
 
 | Command | Aliases | Purpose |

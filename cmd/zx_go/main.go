@@ -1374,6 +1374,7 @@ func (e *emulator) run(a fyne.App, screen *canvas.Image) {
 					// while holding the core would freeze a machine
 					// switch until the user resumed.
 					e.rdbg.WaitIfPaused()
+					e.rdbg.TapTick() // advance `key … tap` frame countdowns (nil-safe)
 
 					// Hold the core for the whole frame so a machine
 					// switch cannot swap cpu/mem/ula out underneath it.
