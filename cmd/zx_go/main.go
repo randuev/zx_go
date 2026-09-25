@@ -2846,6 +2846,8 @@ func main() {
 		currentModel = roms.ModelZX80
 	case flags.startInPentagon:
 		currentModel = roms.ModelPentagon
+	case flags.startInPlus2:
+		currentModel = roms.ModelPlus2
 	case flags.startInSAM:
 		currentModel = roms.ModelSAM
 	}

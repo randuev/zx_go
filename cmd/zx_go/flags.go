@@ -41,6 +41,7 @@ type cliFlags struct {
 	startInZX81     bool
 	startInZX80     bool
 	startInPentagon bool
+	startInPlus2    bool
 	startInSAM      bool
 
 	// trdPath, when set, mounts a TR-DOS .TRD image in Beta drive A at
@@ -285,6 +286,7 @@ func parseCLI() *cliFlags {
 		startInZX81     = flag.Bool("zx81", false, "Boot directly into Sinclair ZX81 mode")
 		startInZX80     = flag.Bool("zx80", false, "Boot directly into Sinclair ZX80 mode")
 		startInPentagon = flag.Bool("pentagon", false, "Boot directly into Pentagon 128 mode")
+		startInPlus2    = flag.Bool("plus2", false, "Boot directly into ZX Spectrum +2 (grey) mode — classic 128K paging, AY, 128K ROM")
 		startInSAM      = flag.Bool("sam", false, "Boot directly into SAM Coupé mode")
 		trdPath         = flag.String("trd", "", "Mount a TR-DOS .TRD disk image in Beta drive A at startup (classic models, e.g. with --pentagon)")
 		tapePath        = flag.String("tape", "", "Load a .tap/.tzx tape into the deck at startup and start playing (works in --headless; on the 48K type LOAD\"\" or use the 128 Tape Loader to read it)")
@@ -412,6 +414,7 @@ func parseCLI() *cliFlags {
 	f.startInZX81 = *startInZX81
 	f.startInZX80 = *startInZX80
 	f.startInPentagon = *startInPentagon
+	f.startInPlus2 = *startInPlus2
 	f.startInSAM = *startInSAM
 	f.trdPath = *trdPath
 	f.tape = *tapePath
