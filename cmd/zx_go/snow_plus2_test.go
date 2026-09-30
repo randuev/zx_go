@@ -174,9 +174,11 @@ func TestSnowPlus2Run(t *testing.T) {
 		sites := map[uint16]byte{0x8114: 0xE0, 0x8134: 0xE4, 0x81C5: 0xE3, 0x898B: 0xE2}
 		var borderPend []byte
 		var borderLog [][2]interface{}
+		var borderT []uint64 // real T-states at each border write
 		emu.cpu.AddPreFetchHook("snow-border", func(pc uint16) {
 			if v, ok := sites[pc]; ok && emu.mem.Read(pc) == 0x3E && emu.mem.Read(pc+1) == v && emu.mem.Read(pc+2) == 0xD3 {
 				borderPend = append(borderPend, v)
+				borderT = append(borderT, emu.cpu.Tstates())
 			}
 		})
 		romHits := 0
@@ -419,6 +421,125 @@ func TestSnowPlus2Run(t *testing.T) {
 			// pattern tokens; every real frame cycle still parses.
 			if pats+nP < 700 || badSeq*10 > len(stream)*3 {
 				t.Errorf("border profile broken: pats=%d+%d stray=%d/%d (%s)", pats, nP, badSeq, len(stream), badSample)
+			}
+		}
+		// ---- REAL T-state budget per phase (frame = 69888 T) ----
+		// Walk the timestamped border timeline: E2->E4 = ISR+loop-head+
+		// pre-flake; E4->E3 = flake paint; E3->E0 = scroller+keyboard;
+		// E0->next E2 = idle-at-HALT until vsync. Frame total = E2->E2.
+		{
+			const frameT = uint64(69888)
+			// Rebuild with values+timestamps pairs: borderLog order matches
+			// borderT (both appended in the same hook sites order per frame,
+			// flush boundaries preserved by concatenation order).
+			var vals []byte
+			for _, e := range borderLog {
+				vals = append(vals, e[1].([]byte)...)
+			}
+			// Find frames by locating E2 starts in vals (vsync first).
+			type span struct{ v byte; t uint64 }
+			var tl []span
+			if len(vals) == len(borderT) {
+				for k := range vals {
+					tl = append(tl, span{vals[k], borderT[k]})
+				}
+			} else {
+				t.Fatalf("timeline mismatch: vals=%d ts=%d", len(vals), len(borderT))
+			}
+			i := 0
+			for i < len(tl) && tl[i].v != 0xE2 {
+				i++
+			}
+			var over, fsSum uint64
+			var fsN int
+			var scrMax, scrSum, flMax, flSum, idleMax, idleSum uint64
+			var scrPct [101]int
+			for i < len(tl) {
+				if tl[i].v != 0xE2 {
+					i++
+					continue
+				}
+				t2 := tl[i].t
+				j := i + 1
+				var t4, t3, t0 int = -1, -1, -1
+				for j < len(tl) && tl[j].v != 0xE2 {
+					switch tl[j].v {
+					case 0xE4:
+						if t4 < 0 {
+							t4 = j
+						}
+					case 0xE3:
+						t3 = j
+					case 0xE0:
+						t0 = j
+					}
+					j++
+				}
+				if j < len(tl) {
+					// last colored write before the next vsync defines the
+					// frame's end; idle = that write until the next E2.
+					endIdx := t0
+					if endIdx < 0 {
+						endIdx = j - 1
+						if endIdx < 0 || tl[endIdx].v != 0xE3 {
+							i = j
+							continue
+						}
+					}
+					if t3 >= 0 {
+						work := tl[endIdx].t - t2
+						idle := uint64(0)
+						if tl[j].t > tl[endIdx].t {
+							idle = tl[j].t - tl[endIdx].t
+						}
+						if work > over {
+							over = work
+						}
+						fsSum += work + idle
+						fsN++
+						if t4 >= 0 {
+							fl := tl[t3].t - tl[t4].t
+							flSum += fl
+							if fl > flMax {
+								flMax = fl
+							}
+						}
+						scr := tl[endIdx].t - tl[t3].t
+						scrSum += scr
+						if scr > scrMax {
+							scrMax = scr
+						}
+						idleSum += idle
+						if idle > idleMax {
+							idleMax = idle
+						}
+						pct := (work * 100) / frameT
+						if pct > 100 {
+							pct = 100
+						}
+						scrPct[pct]++
+					}
+				}
+				i = j
+			}
+			if fsN > 0 {
+				t.Logf("T-BUDGET over %d frames (frame=69888T): work avg=%d max=%d (%d%% max) | flake avg=%d max=%d | scroller+beat avg=%d max=%d | idle avg=%d max=%d | frame avg=%d",
+					fsN, fsSum/uint64(fsN), over, over*100/frameT,
+					flSum/uint64(fsN), flMax, scrSum/uint64(fsN), scrMax, idleSum/uint64(fsN), idleMax, fsSum/uint64(fsN))
+				var hist string
+				for p := 0; p <= 100; p += 5 {
+					n := 0
+					for q := p; q < p+5 && q <= 100; q++ {
+						n += scrPct[q]
+					}
+					if n > 0 {
+						hist += fmt.Sprintf("%d%%:%d ", p, n)
+					}
+				}
+				t.Logf("work%% histogram: %s", hist)
+				if over >= frameT {
+						t.Logf("OVERRUN CONFIRMED: work span %d T >= 69888 (Seva: magenta reaches red)", over)
+					}
 			}
 		}
 		if len(trail) > 0 {
