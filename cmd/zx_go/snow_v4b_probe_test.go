@@ -26,6 +26,9 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 	defer func() { cliFlagsActive = prev }()
 
 	tapPath := "/root/nerve-workspace/demos/snow/snow.tap"
+	if tp := os.Getenv("SNOW_TAP"); tp != "" {
+		tapPath = tp
+	}
 	raw, err := os.ReadFile(tapPath)
 	if err != nil {
 		t.Fatalf("read tap: %v", err)
@@ -178,11 +181,20 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 		return b
 	}
 
-	dumpf, _ := os.Create("/tmp/v4b.dump")
+	dumpPath := "/tmp/v4b.dump"
+	if dp := os.Getenv("SNOW_DUMPF"); dp != "" {
+		dumpPath = dp
+	}
+	dumpf, _ := os.Create(dumpPath)
 	defer dumpf.Close()
 	dump := dumpf
 	matched, failed := 0, 0
-	for i := 0; i < 6000 && len(gold) > 0; i++ {
+	fullSweep := os.Getenv("SNOW_FULL") != ""
+	fullTarget := 0
+	if fullSweep {
+		fullTarget = 4256 // one complete scroll period of parked frames
+	}
+	for i := 0; i < 6000 && (len(gold) > 0 || fullSweep); i++ {
 		// PARK first: spin frames (guarded) until the CPU rests at the
 		// loop-head HALT. Only there is (sroll, band) a coherent pair —
 		// reads anywhere else land mid-paint or mid-quantum.
@@ -274,6 +286,9 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 		}
 		// advance one frame from the HALT so the next park sees new content
 		runOneFrameHeadless(emu, roms.ModelPlus2)
+		if fullSweep && i >= fullTarget+8 {
+			break
+		}
 	}
 	t.Logf("matched=%d failed=%d unmatched=%d", matched, failed, len(gold))
 	if failed > 0 {

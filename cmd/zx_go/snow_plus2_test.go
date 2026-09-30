@@ -274,6 +274,7 @@ func TestSnowPlus2Run(t *testing.T) {
 			if i >= 400 && i < 1800 {
 				readScr(prevScr[:])
 			}
+			parkedTop := emu.cpu.PC == 0x8119 && emu.cpu.Halted
 			if i >= 60 && i <= 440 {
 				readBand(prevBand[:])
 			}
@@ -284,7 +285,13 @@ func TestSnowPlus2Run(t *testing.T) {
 				borderLog = append(borderLog, [2]interface{}{i, cp})
 				borderPend = borderPend[:0]
 			}
-			if i >= 60 && i <= 440 {
+			// Coherent-sample gate: a mid-paint band read aliases to the
+			// previous frame and reads as a false freeze. Only compare when
+			// BOTH reads caught the CPU parked at the loop-head HALT
+			// ($8118 opcode, parked PC $8119); skip the pair otherwise.
+			// (Stepping to HALT instead would perturb the T-counter stream
+			// the budget histogram is derived from — verified, don't.)
+			if i >= 60 && i <= 440 && parkedTop && emu.cpu.PC == 0x8119 && emu.cpu.Halted {
 				readBand(curBand[:])
 				diff := 0
 				for k := range bandIdx {
@@ -298,7 +305,10 @@ func TestSnowPlus2Run(t *testing.T) {
 				} else if len(bandStuck) < 8 {
 					bandStuck = append(bandStuck, i)
 				}
-				if i == 60 {
+				if bandNonZero60 == 0 {
+					// first COHERENT sample in the window proves strip bake;
+					// a raw f60 pump-end read can land mid-clear (0 bytes)
+					// and false-fail the bake gate.
 					nz := 0
 					for k := range bandIdx {
 						if curBand[k] != 0 {
