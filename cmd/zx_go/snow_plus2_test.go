@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/binary"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -167,6 +168,17 @@ func TestSnowPlus2Run(t *testing.T) {
 				pgDropped++
 			}
 		})
+		// Border-profile recorder: capture every `ld a,$EX / out ($FE),a`
+		// execution (Seva's CRT timing diagnostic). Sites verified against
+		// the current tap binary by byte-scan.
+		sites := map[uint16]byte{0x8114: 0xE0, 0x8134: 0xE4, 0x81C5: 0xE3, 0x898B: 0xE2}
+		var borderPend []byte
+		var borderLog [][2]interface{}
+		emu.cpu.AddPreFetchHook("snow-border", func(pc uint16) {
+			if v, ok := sites[pc]; ok && emu.mem.Read(pc) == 0x3E && emu.mem.Read(pc+1) == v && emu.mem.Read(pc+2) == 0xD3 {
+				borderPend = append(borderPend, v)
+			}
+		})
 		romHits := 0
 		firstRom := -1
 		var trail []uint16
@@ -264,6 +276,12 @@ func TestSnowPlus2Run(t *testing.T) {
 				readBand(prevBand[:])
 			}
 			runOneFrameHeadless(emu, roms.ModelPlus2)
+			if len(borderPend) > 0 {
+				cp := make([]byte, len(borderPend))
+				copy(cp, borderPend)
+				borderLog = append(borderLog, [2]interface{}{i, cp})
+				borderPend = borderPend[:0]
+			}
 			if i >= 60 && i <= 440 {
 				readBand(curBand[:])
 				diff := 0
@@ -346,6 +364,63 @@ func TestSnowPlus2Run(t *testing.T) {
 		}
 		t.Logf("scroller: band moved %d/%d window frames; f60 band non-zero bytes = %d; max flakes-in-band = %d",
 			bandMotion, bandWin, bandNonZero60, bandBadFlakes)
+		// Border-profile gate (Seva's diagnostic): concatenated border stream
+		// must be the global repeating pattern RED $E2(vsync ISR) ->
+		// [GREEN $E4 flake pass, even frames] -> MAGENTA $E3(scroller) ->
+		// BLACK $E0(idle to halt). Frame-boundary flushes may split tokens,
+		// so validate the JOINED stream with a small stray tolerance.
+		{
+			var stream []byte
+			for _, e := range borderLog {
+				stream = append(stream, e[1].([]byte)...)
+			}
+			badSeq, pats, nP := 0, 0, 0
+			badSample := ""
+			for k := 0; k < len(stream); {
+				if stream[k] == 0xE2 {
+					if k+3 < len(stream) && stream[k+1] == 0xE4 && stream[k+2] == 0xE3 && stream[k+3] == 0xE0 {
+						pats++
+						k += 4
+						continue
+					}
+					if k+2 < len(stream) && stream[k+1] == 0xE3 && stream[k+2] == 0xE0 {
+						nP++
+						k += 3
+						continue
+					}
+					if k+2 < len(stream) && stream[k+1] == 0xE4 && stream[k+2] == 0xE3 {
+						pats++ // even paint cycle, idle BLACK lands next cycle
+						k += 3
+						continue
+					}
+					if k+1 < len(stream) && stream[k+1] == 0xE0 {
+						nP++ // vsync + loop-head idle with no paint (sped frame)
+						k += 2
+						continue
+					}
+				}
+				badSeq++
+				if badSample == "" {
+					lo := k - 8
+					if lo < 0 {
+						lo = 0
+					}
+					hi := k + 8
+					if hi > len(stream) {
+						hi = len(stream)
+					}
+					badSample = fmt.Sprintf("stream@%d % X", k, stream[lo:hi])
+				}
+				k++
+			}
+			t.Logf("border profile: %d frames logged, %d green-frames, %d odd-frames, %d stray", len(borderLog), pats, nP, badSeq)
+			// Stray tolerance: duplicate vsyncs inside accelerated frames and
+			// the stream's phase-shifted head/tail legitimately fall between
+			// pattern tokens; every real frame cycle still parses.
+			if pats+nP < 700 || badSeq*10 > len(stream)*3 {
+				t.Errorf("border profile broken: pats=%d+%d stray=%d/%d (%s)", pats, nP, badSeq, len(stream), badSample)
+			}
+		}
 		if len(trail) > 0 {
 			t.Errorf("PC escaped program space %d samples (first @f%d): %v", len(trail), firstRom, trail[:min(24, len(trail))])
 		}

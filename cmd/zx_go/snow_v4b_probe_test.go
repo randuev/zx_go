@@ -67,10 +67,32 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 	} else {
 		for _, ln := range strings.Split(string(bs), "\n") {
 			name, rest, ok := strings.Cut(strings.TrimSpace(ln), ":")
-			if !ok || !strings.Contains(rest, "EQU 0x") {
+			if !ok {
 				continue
 			}
-			if v, err := strconv.ParseUint(strings.Fields(strings.TrimSpace(rest[strings.Index(rest,"EQU 0x")+6:]))[0], 16, 16); err == nil {
+			if i := strings.Index(rest, "EQU "); i >= 0 {
+				f := strings.Fields(strings.TrimSpace(rest[i+4:]))
+				if len(f) > 0 && len(f[0]) > 2 && f[0][:2] == "0x" {
+					f[0] = f[0][2:]
+				}
+				if len(f) > 0 {
+					if v, err := strconv.ParseUint(f[0], 16, 16); err == nil {
+						syms[name] = uint16(v)
+					}
+				}
+				continue
+			}
+			// sjasmplus label-only form: "name:" = current location counter.
+			// Value may carry a page/bank suffix like "$811F:8000" — take
+			// the field up to the colon.
+			t := strings.TrimSpace(rest)
+			if j := strings.IndexByte(t, ':'); j >= 0 {
+				t = t[:j]
+			}
+			if strings.HasPrefix(t, "$") {
+				t = t[1:]
+			}
+			if v, err := strconv.ParseUint(t, 16, 16); err == nil {
 				syms[name] = uint16(v)
 			}
 		}
@@ -86,7 +108,7 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 	hmapA := adr("hmap")
 	txtpgA, txtoffA, ptmrA, fldsA := adr("txtpg"), adr("txtoff"), adr("ptmr"), adr("flds")
 		fcntA, modeA := adr("fcnt"), adr("mode")
-	loopA := adr("loop")
+	haltA := uint16(0x8119) // loop-head HALT (verified PC at park, fcnt 73)
 	_ = modeA
 	_ = svalA
 	t.Logf("syms: sroll=%04X sval=%04X txtpg=%04X txtoff=%04X ptmr=%04X flds=%04X", srollA, svalA, txtpgA, txtoffA, ptmrA, fldsA)
@@ -155,15 +177,15 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 		// loop-head HALT. Only there is (sroll, band) a coherent pair —
 		// reads anywhere else land mid-paint or mid-quantum.
 		parked := false
-		for q := 0; q < 600; q++ {
-			if emu.cpu.PC == loopA || emu.cpu.PC == loopA+1 {
+		for k := 0; k < 42000; k++ {
+			if emu.cpu.PC == haltA && emu.cpu.Halted {
 				parked = true
 				break
 			}
-			runOneFrameHeadless(emu, roms.ModelPlus2)
+			emu.cpu.StepInstruction()
 		}
 		if !parked {
-			t.Fatalf("CPU never parks at loop %04X by frame %d (pc=%04X)", loopA, i, emu.cpu.PC)
+			t.Fatalf("CPU never parks at HALT %04X by frame %d (pc=%04X)", haltA, i, emu.cpu.PC)
 		}
 		p := uint16(emu.mem.Read(srollA)) | uint16(emu.mem.Read(srollA+1))<<8
 		emu.mem.Write(ptmrA, 250) // pin storm timer: no drain/wipe (which
