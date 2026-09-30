@@ -108,7 +108,7 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 	hmapA := adr("hmap")
 	txtpgA, txtoffA, ptmrA, fldsA := adr("txtpg"), adr("txtoff"), adr("ptmr"), adr("flds")
 		fcntA, modeA := adr("fcnt"), adr("mode")
-	haltA := uint16(0x8119) // loop-head HALT (verified PC at park, fcnt 73)
+	haltA := uint16(0x8119) // parked PC = HALT@8118 + 1 (PC advances, then stalls)
 	_ = modeA
 	_ = svalA
 	t.Logf("syms: sroll=%04X sval=%04X txtpg=%04X txtoff=%04X ptmr=%04X flds=%04X", srollA, svalA, txtpgA, txtoffA, ptmrA, fldsA)
@@ -158,6 +158,16 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 	emu.cpu.PC = 0x8000
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
+	// Neutralise the known headless ghost-key quit flake (documented class:
+	// step-parking freezes fcnt, the 8-frame beat drains grace instantly, and
+	// a deterministic IN echo confirms 3x -> phantom quit -> IM1 ROM escape at
+	// $0BD7). This probe verifies BAND BYTES only; quit behaviour is proven
+	// end-to-end by TestSnowPlus2Run. Stub kfull := ld a,$1F ; ret (Z=yes).
+	// NOTE: kfull lives at $8369 (kpoll's call is CD 69 83 — tap ground
+	// truth). snow.sym's "kfull EQU $835D" is stale/wrong; $835D is an
+	// unrelated hmap helper and stubbing it corrupts the stack.
+	emu.mem.Write(0x8369, 0xAF) // xor a
+	emu.mem.Write(0x836A, 0xC9) // ret  (Z=1 -> "no key")
 
 	readBand := func() []byte {
 		b := make([]byte, 256)
