@@ -100,7 +100,7 @@ func TestSnowScrollerCost(t *testing.T) {
 			ci++
 			m.tint = int64(emu.cpu.Tstates())
 			m.te3 = -1
-		case 0x81C5:
+		case 0x81D1:
 			ce++
 			if m.tint >= 0 && m.te3 < 0 {
 				m.te3 = int64(emu.cpu.Tstates())

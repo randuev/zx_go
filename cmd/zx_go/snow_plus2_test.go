@@ -171,7 +171,7 @@ func TestSnowPlus2Run(t *testing.T) {
 		// Border-profile recorder: capture every `ld a,$EX / out ($FE),a`
 		// execution (Seva's CRT timing diagnostic). Sites verified against
 		// the current tap binary by byte-scan.
-		sites := map[uint16]byte{0x8114: 0xE0, 0x8134: 0xE4, 0x81C5: 0xE3, 0x898B: 0xE2}
+		sites := map[uint16]byte{0x8114: 0xE0, 0x8134: 0xE4, 0x81D1: 0xE3, 0x898B: 0xE2}
 		var borderPend []byte
 		var borderLog [][2]interface{}
 		var borderT []uint64 // real T-states at each border write
