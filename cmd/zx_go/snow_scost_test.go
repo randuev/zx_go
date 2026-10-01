@@ -1,23 +1,54 @@
 package main
 
-// Throwaway: authoritative per-COLUMN cost inside the scroller.
-// Hooks all 8 SBAND loop heads (ld a,(iy+1) = FD 7E 01, $8470..$85D5
-// $33 apart) + E3@81D1 (border before call sscroll) + INT@8989.
-// Delta between consecutive hits at the SAME site = exact T cost of one
-// band byte at the current sval. Also captures sval AT E3 (before the
-// call, i.e. the value THIS frame's paint will use — sval is recomputed
-// inside sscroll, so reading it at E0 sees the same frame's value only
-// by luck; keying must happen before the call).
+// Drain-cycle oracle (2026-10-01). The per-COLUMN scroller breakdown was
+// unmeasurable — the main loop parks at HALT and a halted Z80 re-issues the
+// M1 fetch at the SAME PC every 4T, so pre-fetch hooks anchored at the loop
+// head were re-armed every halt tick (window reset forever -> zero frames).
+// Instead: st_drained marks the end of a drain (~f1744, first frame after
+// snow death). Arm the hook there and measure loop-cycle lengths over the
+// frames that follow — by construction these include every revive/respawn
+// paint during the next storm: the seamless-loop guarantee as a number.
 // Delete when the scroller budget is locked.
 
 import (
 	"fmt"
 	"os"
-	"sort"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/conorarmstrong/zx_go/pkg/roms"
 )
+
+// readSym parses sjasmplus --sym output ("name: EQU 0x0000NNNN").
+// Strip ; comments, the EQU keyword, and $/0x prefixes — ParseUint with
+// an explicit base REJECTS "0x..." (biting every lookup once silently).
+func readSym(path, name string) (uint16, bool) {
+	bs, err := os.ReadFile(path)
+	if err != nil {
+		return 0, false
+	}
+	for _, ln := range strings.Split(string(bs), "\n") {
+		n, rest, ok := strings.Cut(strings.TrimSpace(ln), ":")
+		if !ok || n != name {
+			continue
+		}
+		t2 := strings.TrimSpace(rest)
+		if j := strings.IndexByte(t2, ';'); j >= 0 {
+			t2 = t2[:j]
+		}
+		if k := strings.Index(t2, "EQU"); k >= 0 {
+			t2 = t2[k+3:]
+		}
+		t2 = strings.TrimSpace(t2)
+		t2 = strings.TrimPrefix(t2, "$")
+		t2 = strings.TrimPrefix(t2, "0x")
+		if v, err := strconv.ParseUint(t2, 16, 16); err == nil {
+			return uint16(v), true
+		}
+	}
+	return 0, false
+}
 
 func TestSnowScrollerCost(t *testing.T) {
 	prev := cliFlagsActive
@@ -71,204 +102,121 @@ func TestSnowScrollerCost(t *testing.T) {
 	emu.cpu.PC = 0x8000
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
-	// generation switch: SNOW_GEN=v4b for the counted-shift baseline tap
-	gen := os.Getenv("SNOW_GEN")
-	var sbSites []uint16
-	var e3A, intA, kfullStub uint16
-	switch gen {
-	case "v4b":
-		sbSites = []uint16{0x8470, 0x84A3, 0x84D6, 0x8509, 0x853C, 0x856F, 0x85A2, 0x85D5}
-		e3A, intA, kfullStub = 0x81D3, 0x8989, 0x835D
-	default: // v4c2 flat
-		sbSites = []uint16{0x8487, 0x84B9, 0x84EB, 0x851D, 0x854F, 0x8581, 0x85B3, 0x85E5}
-		e3A, intA, kfullStub = 0x81D3, 0x8989, 0x8375
-	}
-	svalA := uint16(0x8CA0)
-	emu.mem.Write(kfullStub, 0xAF) // kfull stub: no ghost-key quits
-	emu.mem.Write(kfullStub+1, 0xC9)
 
-
-	var lastAt [8]int64      // last Tstates at each .sb site
-	var lastS [8]uint8        // sval in force at that hit
-	var tE3 int64            = -1 // Tstates at E3 (this frame's paint start)
-	var rowArmed [8]bool
-	var sPaint uint8          // sval of the paint run being measured (row-0 anchor)
-	var colDeltas []struct { // per-column costs this captured window
-		s    uint8
-		t    int64
-		site int
+	base := uint16(0x8000)
+	// loop head + drain marker via fresh syms; E3 via byte scan (stale hex
+	// burned probes twice).
+	loopA, ok := readSym("/root/nerve-workspace/demos/snow/snow.sym", "loop")
+	if !ok || loopA == 0 {
+		t.Fatal("loop sym missing")
 	}
-	var frameRecs []struct { // per scroller-execution spans
-		s        uint8
-		span, by uint64
+	drainedA, ok := readSym("/root/nerve-workspace/demos/snow/snow.sym", "st_drained")
+	if !ok || drainedA == 0 {
+		t.Fatal("st_drained sym missing")
 	}
-	var e0, e3cnt, ints int
-	var tE0Prev int64 = -1
-	var loopCy []int64
+	e3A := uint16(0)
+	for i := 0; i+7 < len(code); i++ {
+		if code[i] == 0x3E && code[i+1] == 0xE3 && code[i+2] == 0xD3 && code[i+3] == 0xFE && code[i+4] == 0xCD {
+			e3A = base + uint16(i)
+			break
+		}
+	}
+	if e3A == 0 {
+		t.Fatal("E3 site not found")
+	}
+	t.Logf("anchors: loop=%04X st_drained=%04X e3=%04X", loopA, drainedA, e3A)
 
+	var cyc []int64
+	var tLoop int64 = -1
+	var tE3 int64 = -1
+	var cycWorst int64
+	var spans []int64
+	var spanWorst int64
+	var armedAt, painted, frames int
+	hooked := false
 	emu.cpu.AddPreFetchHook("cost", func(pc uint16) {
-		t := int64(emu.cpu.Tstates())
-		for i, a := range sbSites {
-			if pc != a {
-				continue
+		if !hooked {
+			if pc == drainedA {
+				hooked = true
+				armedAt = frames
 			}
-			if !rowArmed[i] {
-				// First column of this row: authoritative sval anchor.
-				rowArmed[i] = true
-				s := uint8(emu.mem.Read(svalA))
-				lastAt[i] = t
-				lastS[i] = s
-				if i == 0 {
-					sPaint = s // the phase THIS paint run uses
-				}
-				return
-			}
-			if lastAt[i] <= t && lastS[i] == sPaint && tE3 >= 0 {
-				colDeltas = append(colDeltas, struct {
-					s    uint8
-					t    int64
-					site int
-				}{lastS[i], t - lastAt[i], i})
-			}
-			lastAt[i] = t
 			return
 		}
 		switch pc {
-		case e3A: // E3: paint start; sval finalized INSIDE sscroll, so
-			// the phase key is anchored at row-0's first column below.
-			e3cnt++
-			tE3 = t
-			// re-arm row anchors: first column of each row re-captures sval
-			for i := range lastAt {
-				lastAt[i] = 0
-				rowArmed[i] = false
-			}
-		case 0x8114: // E0: paint finished, back at loop head
-			e0++
-			if tE0Prev >= 0 && t >= tE0Prev {
-				loopCy = append(loopCy, t-tE0Prev)
-			}
-			if tE3 >= 0 && t >= tE3 { // spans crossing T-wrap are dropped
-				n := 0
-				for _, c := range colDeltas {
-					if c.s == sPaint {
-						n++
+		case loopA:
+			frames++
+			t := int64(emu.cpu.Tstates())
+			if tLoop >= 0 {
+				c := t - tLoop
+				if c > 0 { // negative = T rebased at frame boundary; drop
+					cyc = append(cyc, c)
+					if c > cycWorst {
+						cycWorst = c
 					}
 				}
-				frameRecs = append(frameRecs, struct {
-					s        uint8
-					span, by uint64
-				}{sPaint, uint64(t - tE3), uint64(n)})
+			}
+			tLoop = t
+			if tE3 >= 0 {
+				sp := t - tE3
+				if sp > 0 {
+					spans = append(spans, sp)
+					if sp > spanWorst {
+						spanWorst = sp
+					}
+				}
 				tE3 = -1
 			}
-			tE0Prev = t
-		case intA:
-			ints++
+		case e3A:
+			painted++
+			tE3 = int64(emu.cpu.Tstates())
 		}
 	})
-	nf2 := 400
+	// Count pre-arm frames too (so armedAt is meaningful).
+	var preFrames int
+	emu.cpu.AddPreFetchHook("cost-pre", func(pc uint16) {
+		if !hooked && pc == loopA {
+			preFrames++
+		}
+	})
+
+	nf2 := 2500
 	if v := os.Getenv("SNOW_COST_FRAMES"); v != "" {
 		fmt.Sscanf(v, "%d", &nf2)
 	}
 	for f := 0; f < nf2; f++ {
 		runOneFrameHeadless(emu, roms.ModelPlus2)
 	}
-	_ = tE0Prev
 
-	fmt.Printf("COUNTS e0=%d e3=%d int=%d cols=%d frames=%d\n",
-		e0, e3cnt, ints, len(colDeltas), len(frameRecs))
-	if len(frameRecs) == 0 {
-		t.Fatal("no scroller frames captured")
+	fmt.Printf("armed at loop-head frame %d (pre-arm frames=%d)\n", armedAt, preFrames)
+	if len(cyc) == 0 {
+		t.Fatal("no post-drain loop cycles captured")
 	}
+	var sum int64
+	for _, v := range cyc {
+		sum += v
+	}
+	fmt.Printf("POST-DRAIN LOOP CYCLE (revive included): n=%d avg=%d worst=%d (%.1f%% of 69888)\n",
+		len(cyc), sum/int64(len(cyc)), cycWorst, float64(cycWorst)/69888.0*100.0)
+	if len(spans) > 0 {
+		var ss int64
+		for _, v := range spans {
+			ss += v
+		}
+		fmt.Printf("SCROLLER span (E3->E0): n=%d avg=%d worst=%d\n",
+			len(spans), ss/int64(len(spans)), spanWorst)
+	}
+	fmt.Printf("E3 paint executions captured: %d\n", painted)
 
-	// per-phase: scroller span and per-column cost
-	type agg struct {
-		n     int
-		span  uint64
-		cost  uint64
-		cmax  int64
-		cmin  int64
+	var tiny int
+	for _, v := range cyc {
+		if v < 16 {
+			tiny++
+		}
 	}
-	byS := map[uint8]*agg{}
-	sites := map[[2]int]*agg{}
-	for _, c := range colDeltas {
-		a := byS[c.s]
-		if a == nil {
-			a = &agg{cmin: 1 << 62}
-			byS[c.s] = a
-		}
-		a.n++
-		a.cost += uint64(c.t)
-		if c.t > a.cmax {
-			a.cmax = c.t
-		}
-		if c.t < a.cmin {
-			a.cmin = c.t
-		}
-		k := [2]int{int(c.s), c.site}
-		sa := sites[k]
-		if sa == nil {
-			sa = &agg{cmin: 1 << 62}
-			sites[k] = sa
-		}
-		sa.n++
-		sa.cost += uint64(c.t)
+	if tiny > 0 {
+		t.Errorf("anchor polluted: %d cycles <16T (halt M1 refetch?)", tiny)
 	}
-	var sumSpan uint64
-	var maxSpan uint64
-	var worstU uint8
-	spanBy := map[uint8][]uint64{}
-	for _, r := range frameRecs {
-		sumSpan += r.span
-		if r.span > maxSpan {
-			maxSpan, worstU = r.span, r.s
-		}
-		spanBy[r.s] = append(spanBy[r.s], r.span)
-	}
-	if len(loopCy) > 0 {
-		var mx int64
-		var sum int64
-		for _, v := range loopCy {
-			sum += v
-			if v > mx {
-				mx = v
-			}
-		}
-		fmt.Printf("LOOP CYCLE: n=%d avg=%d max=%d (%.1f%% of 69888)\n",
-			len(loopCy), sum/int64(len(loopCy)), mx,
-			float64(mx)/69888.0*100.0)
-	}
-	fmt.Printf("SCROLLER span: avg=%d max=%d (worst s=%d)\n",
-		sumSpan/uint64(len(frameRecs)), maxSpan, worstU)
-	ks := []int{}
-	for k := range byS {
-		ks = append(ks, int(k))
-	}
-	sort.Ints(ks)
-	fmt.Printf("  phase  frames  spanAvg   colT avg/min/max\n")
-	for _, k := range ks {
-		a := byS[uint8(k)]
-		sb := spanBy[uint8(k)]
-		var sav uint64
-		for _, v := range sb {
-			sav += v
-		}
-		if len(sb) > 0 {
-			sav /= uint64(len(sb))
-		}
-		fmt.Printf("  s=%d    n=%3d   %7d   %6d/%d/%d\n",
-			k, len(sb), sav, a.cost/uint64(a.n), a.cmin, a.cmax)
-	}
-	if os.Getenv("SNOW_COST_ROWS") != "" {
-		rk := []int{}
-		for k := range sites {
-			rk = append(rk, k[0]*100+k[1])
-		}
-		sort.Ints(rk)
-		for _, v := range rk {
-			k := [2]int{v / 100, v % 100}
-			a := sites[k]
-			fmt.Printf("  s=%d row%d n=%3d colAvg=%d\n", k[0], k[1], a.n, a.cost/uint64(a.n))
-		}
+	if cycWorst > 55000 {
+		t.Errorf("post-drain cycle worst %dT exceeds 55k budget", cycWorst)
 	}
 }

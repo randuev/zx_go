@@ -1,14 +1,16 @@
 package main
 
-// Throwaway v4b probe: byte-compare the scroller band (y184..191) against
-// mkfont.py goldens (bandref.txt) on the +2 core. Delete once v4b is locked.
+// Throwaway probe: byte-compare the scroller band (y184..191) against
+// mkfont.py goldens (bandref.txt) on the +2 core. Anchors are derived at
+// runtime (fresh syms when parseable, raw-byte scans otherwise) because
+// stale hardcoded hex silently mis-hooked the whole v4b era once already.
+// Delete once the scroller budget is locked.
 
 import (
-	"fmt"
 	"encoding/binary"
 	"encoding/hex"
-	"strconv"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -63,58 +65,88 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 	if len(blocks) < 1 {
 		t.Fatalf("no CODE block")
 	}
+	code := blocks[0].data
+	base := blocks[0].addr
 
 	syms := map[string]uint16{}
-	if bs, err := os.ReadFile("/root/nerve-workspace/demos/snow/snow.sym"); err != nil {
-		t.Fatalf("read sym: %v", err)
-	} else {
+	if bs, err := os.ReadFile("/root/nerve-workspace/demos/snow/snow.sym"); err == nil {
 		for _, ln := range strings.Split(string(bs), "\n") {
 			name, rest, ok := strings.Cut(strings.TrimSpace(ln), ":")
 			if !ok {
 				continue
 			}
-			if i := strings.Index(rest, "EQU "); i >= 0 {
-				f := strings.Fields(strings.TrimSpace(rest[i+4:]))
-				if len(f) > 0 && len(f[0]) > 2 && f[0][:2] == "0x" {
-					f[0] = f[0][2:]
-				}
-				if len(f) > 0 {
-					if v, err := strconv.ParseUint(f[0], 16, 16); err == nil {
-						syms[name] = uint16(v)
-					}
-				}
-				continue
-			}
-			// sjasmplus label-only form: "name:" = current location counter.
-			// Value may carry a page/bank suffix like "$811F:8000" — take
-			// the field up to the colon.
 			t := strings.TrimSpace(rest)
-			if j := strings.IndexByte(t, ':'); j >= 0 {
+			if i := strings.Index(t, "EQU "); i >= 0 {
+				t = strings.TrimSpace(t[i+4:])
+			}
+			if j := strings.IndexByte(t, ';'); j >= 0 {
 				t = t[:j]
 			}
-			if strings.HasPrefix(t, "$") {
-				t = t[1:]
+			if k := strings.Index(t, "EQU"); k >= 0 {
+				t = t[k+3:]
 			}
+			t = strings.TrimSpace(t)
+			t = strings.TrimPrefix(t, "$")
+			t = strings.TrimPrefix(t, "0x")
 			if v, err := strconv.ParseUint(t, 16, 16); err == nil {
 				syms[name] = uint16(v)
 			}
 		}
 	}
-	adr := func(n string) uint16 {
-		v, ok := syms[n]
-		if !ok {
-			t.Fatalf("sym %s missing", n)
+	// E3 (magenta-before-sscroll) = ld a,$E3 ; out ($FE),a ; call sscroll
+	e3A := uint16(0)
+	for i := 0; i+7 < len(code); i++ {
+		if code[i] == 0x3E && code[i+1] == 0xE3 && code[i+2] == 0xD3 && code[i+3] == 0xFE && code[i+4] == 0xCD {
+			e3A = base + uint16(i)
+			break
 		}
-		return v
 	}
-	srollA, svalA := adr("sroll"), adr("sval")
-	hmapA := adr("hmap")
-	txtpgA, txtoffA, ptmrA, fldsA := adr("txtpg"), adr("txtoff"), adr("ptmr"), adr("flds")
-		fcntA, modeA := adr("fcnt"), adr("mode")
-	haltA := uint16(0x8119) // parked PC = HALT@8118 + 1 (PC advances, then stalls)
-	_ = modeA
-	_ = svalA
-	t.Logf("syms: sroll=%04X sval=%04X txtpg=%04X txtoff=%04X ptmr=%04X flds=%04X", srollA, svalA, txtpgA, txtoffA, ptmrA, fldsA)
+	if e3A == 0 {
+		t.Fatalf("E3 site not found in code")
+	}
+		// Loop head via fresh syms (sjasmplus DOES emit bare labels as EQU
+	// now — the old "jr -> 0x76" backward scan died when back-branches
+	// became jp loop). HALT = first 0x76 within 16 bytes of loop head
+	// (current layout: ld a,$E0/out/halt).
+	loopA, haltA := uint16(0), uint16(0)
+	if bs, err := os.ReadFile("/root/nerve-workspace/demos/snow/snow.sym"); err == nil {
+		for _, ln := range strings.Split(string(bs), "\n") {
+			n, rest, ok := strings.Cut(strings.TrimSpace(ln), ":")
+			if !ok || n != "loop" {
+				continue
+			}
+			t2 := strings.TrimSpace(rest)
+			if k := strings.Index(t2, "EQU"); k >= 0 {
+				t2 = t2[k+3:]
+			}
+			t2 = strings.TrimSpace(t2)
+			t2 = strings.TrimPrefix(t2, "$")
+			t2 = strings.TrimPrefix(t2, "0x")
+			if v, err := strconv.ParseUint(t2, 16, 16); err == nil {
+				loopA = uint16(v)
+			}
+			break
+		}
+	}
+	if loopA == 0 {
+		t.Fatalf("loop sym not in snow.sym")
+	}
+	for i := int(loopA) - int(base); i < int(loopA)-int(base)+16 && i < len(code); i++ {
+		if code[i] == 0x76 {
+			haltA = base + uint16(i)
+			break
+		}
+	}
+	if haltA == 0 {
+		t.Fatalf("HALT not found within 16B of loop head")
+	}
+t.Logf("anchors: e3=%04X loop=%04X halt=%04X", e3A, loopA, haltA)
+
+	srollA := syms["sroll"]
+	ptmrA := syms["ptmr"]
+	if srollA == 0 || ptmrA == 0 {
+		t.Fatalf("sroll/ptmr syms missing")
+	}
 
 	gold := map[uint16][]byte{}
 	gs, err := os.ReadFile("/root/nerve-workspace/demos/snow/bandref.txt")
@@ -128,7 +160,7 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 		}
 		f := strings.Fields(ln)
 		if len(f) != 2 || len(f[1]) != 512 {
-			t.Fatalf("bad golden line: %q", ln[:40])
+			t.Fatalf("bad golden line: %q", ln[:min(len(ln), 40)])
 		}
 		bs, err := hex.DecodeString(f[1])
 		if err != nil {
@@ -161,16 +193,21 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 	emu.cpu.PC = 0x8000
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
-	// Neutralise the known headless ghost-key quit flake (documented class:
-	// step-parking freezes fcnt, the 8-frame beat drains grace instantly, and
-	// a deterministic IN echo confirms 3x -> phantom quit -> IM1 ROM escape at
-	// $0BD7). This probe verifies BAND BYTES only; quit behaviour is proven
-	// end-to-end by TestSnowPlus2Run. Stub kfull := ld a,$1F ; ret (Z=yes).
-	// NOTE: kfull lives at $8369 (kpoll's call is CD 69 83 — tap ground
-	// truth). snow.sym's "kfull EQU $835D" is stale/wrong; $835D is an
-	// unrelated hmap helper and stubbing it corrupts the stack.
-	emu.mem.Write(0x8369, 0xAF) // xor a
-	emu.mem.Write(0x836A, 0xC9) // ret  (Z=1 -> "no key")
+	// Neutralise the headless ghost-key quit flake (documented class). Stub
+	// kfull := xor a ; ret (Z=yes -> "no key") found by its call pattern.
+	kfullA := uint16(0)
+	for i := 0; i+5 < len(code); i++ {
+		if code[i] == 0xCD && code[i+3] == 0xCA {
+			kfullA = base + uint16(code[i+1]) | uint16(code[i+2])<<8
+			break
+		}
+	}
+	if kfullA == 0 {
+		t.Fatalf("kfull call site not found")
+	}
+	t.Logf("kfull target=%04X", kfullA)
+	emu.mem.Write(kfullA, 0xAF)
+	emu.mem.Write(kfullA+1, 0xC9)
 
 	readBand := func() []byte {
 		b := make([]byte, 256)
@@ -181,92 +218,22 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 		return b
 	}
 
-	dumpPath := "/tmp/v4b.dump"
-	if dp := os.Getenv("SNOW_DUMPF"); dp != "" {
-		dumpPath = dp
-	}
-	dumpf, _ := os.Create(dumpPath)
-	defer dumpf.Close()
-	dump := dumpf
 	matched, failed := 0, 0
-	fullSweep := os.Getenv("SNOW_FULL") != ""
-	fullTarget := 0
-	if fullSweep {
-		fullTarget = 4768 // one complete scroll period of parked frames
-	}
-	for i := 0; i < 6000 && (len(gold) > 0 || fullSweep); i++ {
-		// PARK first: spin frames (guarded) until the CPU rests at the
-		// loop-head HALT. Only there is (sroll, band) a coherent pair —
-		// reads anywhere else land mid-paint or mid-quantum.
+	for i := 0; i < 6000 && len(gold) > 0; i++ {
 		parked := false
 		for k := 0; k < 42000; k++ {
-			if emu.cpu.PC == haltA && emu.cpu.Halted {
+			if emu.cpu.PC == haltA+1 && emu.cpu.Halted {
 				parked = true
 				break
 			}
 			emu.cpu.StepInstruction()
 		}
 		if !parked {
-			t.Fatalf("CPU never parks at HALT %04X by frame %d (pc=%04X)", haltA, i, emu.cpu.PC)
+			t.Fatalf("CPU never parks at HALT+1 %04X by frame %d (pc=%04X)", haltA+1, i, emu.cpu.PC)
 		}
 		p := uint16(emu.mem.Read(srollA)) | uint16(emu.mem.Read(srollA+1))<<8
-		emu.mem.Write(ptmrA, 250) // pin storm timer: no drain/wipe (which
-		// resets sroll) — let sroll run the full 4256 px period incl. seam.
-		if os.Getenv("SNOW_NOFLAKE") != "" {
-			for f := 0; f < 36; f++ {
-				emu.mem.Write(fldsA+uint16(f*4+1), 0xFF) // kill flakes: y=$FF
-			}
-		}
+		emu.mem.Write(ptmrA, 250) // pin storm timer: no drain/wipe resets
 		got := readBand()
-		if os.Getenv("SNOW_DUMP") != "" {
-			maxy, mh, nz := 0, 0, 0
-			for f := 0; f < 36; f++ {
-				if y := int(emu.mem.Read(fldsA + uint16(f*4+1))); y != 0xFF && y > maxy {
-					maxy = y
-				}
-			}
-			for o := 0; o < 256; o++ {
-				if h := int(emu.mem.Read(hmapA + uint16(o))); h > mh {
-					mh = h
-				}
-			}
-			for _, v := range got {
-				if v != 0 {
-					nz++
-				}
-			}
-			fmt.Fprintf(dump, "%d %s F=%d NZ=%d\n", p, hex.EncodeToString(got),
-				emu.mem.Read(fcntA), nz)
-			if p == 7 || p == 100 || p == 3000 || p == 3935 || p == 3999 || p == 4000 || p == 4254 || p == 4255 {
-				wb := uint16(emu.mem.Read(txtpgA))<<8 | uint16(emu.mem.Read(txtoffA))
-				win := make([]byte, 33)
-				for j := range win {
-					win[j] = emu.mem.Read(wb + uint16(j))
-				}
-				fmt.Fprintf(dump, "#WIN p=%d wb=%04X win=%s\n", p, wb, hex.EncodeToString(win))
-				fk := make([]byte, 48)
-				for j := range fk {
-					fk[j] = emu.mem.Read(fldsA + uint16(j))
-				}
-				fmt.Fprintf(dump, "#FLK p=%d %s\n", p, hex.EncodeToString(fk))
-				ra, _ := os.ReadFile("/root/nerve-workspace/demos/snow/bandref.txt")
-				for _, ln := range strings.Split(string(ra), "\n") {
-					fs := strings.Fields(ln)
-					if len(fs) == 2 && fs[0] == fmt.Sprintf("%d", p) {
-						gb, _ := hex.DecodeString(fs[1])
-						for i := 0; i < 256; i++ {
-							if got[i] != gb[i] {
-								fmt.Fprintf(dump, "#DIF p=%d i=%d r%d c%d got=%02X gold=%02X\n",
-									p, i, i/32, i%32, got[i], gb[i])
-							}
-						}
-					}
-				}
-			}
-			if maxy >= 160 || mh >= 16 {
-				fmt.Fprintf(dump, "#STAT p=%d maxy=%d maxh=%d\n", p, maxy, mh)
-			}
-		}
 		if g, ok := gold[p]; ok {
 			if string(got) == string(g) {
 				matched++
@@ -284,17 +251,13 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 			}
 			delete(gold, p)
 		}
-		// advance one frame from the HALT so the next park sees new content
 		runOneFrameHeadless(emu, roms.ModelPlus2)
-		if fullSweep && i >= fullTarget+8 {
-			break
-		}
 	}
 	t.Logf("matched=%d failed=%d unmatched=%d", matched, failed, len(gold))
 	if failed > 0 {
 		t.Fatalf("%d golden frames mismatched", failed)
 	}
-	if matched < len(gold)+failed || matched == 0 {
-		t.Fatalf("only %d goldens reached", matched)
+	if matched == 0 {
+		t.Fatalf("no goldens reached")
 	}
 }

@@ -171,7 +171,52 @@ func TestSnowPlus2Run(t *testing.T) {
 		// Border-profile recorder: capture every `ld a,$EX / out ($FE),a`
 		// execution (Seva's CRT timing diagnostic). Sites verified against
 		// the current tap binary by byte-scan.
-		sites := map[uint16]byte{0x8114: 0xE0, 0x8134: 0xE4, 0x81D3: 0xE3, 0x898B: 0xE2}
+		// sites derived at runtime from the loaded CODE block — stale hex
+		// once hooked a moved E0 and silently mis-counted the whole profile
+		// (2026-10-01). loop=$8114 label-pinned; E3/E4 found by byte scan;
+		// E2 ISR pinned $8989 via defs guard in source.
+		loopA := sym("loop", 0x8114)
+		var codeB []byte
+		if raw, err := os.ReadFile("/root/nerve-workspace/demos/snow/snow.tap"); err == nil {
+			o := 0
+			var pend uint16
+			for o+2 <= len(raw) {
+				n := int(raw[o]) | int(raw[o+1])<<8
+				o += 2
+				if o+n > len(raw) {
+					break
+				}
+				p := raw[o : o+n]
+				o += n
+				if len(p) < 16 {
+					continue
+				}
+				if p[0] == 0x00 && p[1] == 0x03 && n >= 16 {
+					pend = uint16(p[14]) | uint16(p[15])<<8
+					continue
+				}
+				if p[0] == 0xFF && pend == 0x8000 && n > 5000 {
+					codeB = p[1 : n-1]
+				}
+			}
+		}
+		e3A, e4A := uint16(0x81D1), uint16(0x8134) // defaults
+		if codeB != nil {
+			for i := 0; i+7 < len(codeB); i++ {
+				if codeB[i] == 0x3E && codeB[i+1] == 0xE3 && codeB[i+2] == 0xD3 && codeB[i+3] == 0xFE && codeB[i+4] == 0xCD {
+					e3A = 0x8000 + uint16(i)
+					break
+				}
+			}
+			// E4 flake-pass: last `ld a,$E4 ; out ($FE),a` strictly before E3
+			for i := e3A - 0x8000 - 5; i > 0x114; i-- {
+				if codeB[i] == 0x3E && codeB[i+1] == 0xE4 && codeB[i+2] == 0xD3 && codeB[i+3] == 0xFE {
+					e4A = 0x8000 + uint16(i)
+					break
+				}
+			}
+		}
+		sites := map[uint16]byte{loopA: 0xE0, e4A: 0xE4, e3A: 0xE3, 0x898B: 0xE2}
 		var borderPend []byte
 		var borderLog [][2]interface{}
 		var borderT []uint64 // real T-states at each border write
@@ -200,6 +245,7 @@ func TestSnowPlus2Run(t *testing.T) {
 		var prevScr, curScr [6144]byte
 		readScr := func(dst []byte) { copy(dst, emu.mem.RAM8KPage(10)[:6144]) }
 		contentChanged, stillFrames := 0, []int{}
+		maxLivePost := 0
 		sumH := func() int {
 			s := 0
 			for k := 0; k < 256; k++ {
@@ -334,6 +380,21 @@ func TestSnowPlus2Run(t *testing.T) {
 				romHits++
 				if firstRom < 0 {
 					firstRom = i
+				}
+			}
+			// seamless-loop respawn gate: the drain (~f2150) settles all
+			// flakes to y=$FF; the old wipe respawned them, its removal
+			// killed resurrection — "snow stopped falling after restart"
+			// (Seva). After drain, live records must climb from 0.
+			if i >= 2150 && i <= 3000 {
+				live := 0
+				for k := 0; k < 36; k++ {
+					if emu.mem.Read(fldsAddr+1+uint16(4*k)) != 0xFF {
+						live++
+					}
+				}
+				if live > maxLivePost {
+					maxLivePost = live
 				}
 			}
 			lit := litBytes(emu, 5)
