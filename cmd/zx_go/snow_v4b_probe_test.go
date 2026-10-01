@@ -192,7 +192,7 @@ func TestSnowV4bGoldenBand(t *testing.T) {
 	fullSweep := os.Getenv("SNOW_FULL") != ""
 	fullTarget := 0
 	if fullSweep {
-		fullTarget = 4256 // one complete scroll period of parked frames
+		fullTarget = 4768 // one complete scroll period of parked frames
 	}
 	for i := 0; i < 6000 && (len(gold) > 0 || fullSweep); i++ {
 		// PARK first: spin frames (guarded) until the CPU rests at the

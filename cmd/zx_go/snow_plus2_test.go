@@ -299,10 +299,11 @@ func TestSnowPlus2Run(t *testing.T) {
 				} else if len(bandStuck) < 8 {
 					bandStuck = append(bandStuck, i)
 				}
-				if bandNonZero60 == 0 {
-					// first COHERENT sample in the window proves strip bake;
-					// a raw f60 pump-end read can land mid-clear (0 bytes)
-					// and false-fail the bake gate.
+				if bandNonZero60 == 0 && i >= 400 {
+					// first COHERENT sample proves strip bake. 2026-10-01
+					// (Seva 32-space lead-in): text starts at stream k=32,
+					// k0 = sroll>>3 -> glyphs guaranteed visible f>=256;
+					// sample f>=400. A raw pump-end read can land mid-clear.
 					nz := 0
 					for k := range bandIdx {
 						if curBand[k] != 0 {
@@ -346,7 +347,7 @@ func TestSnowPlus2Run(t *testing.T) {
 					i, emu.cpu.PC, lit, s, emu.cpu.IM, emu.cpu.I, emu.cpu.IFF1,
 					emu.mem.Read(phaseAddr))
 			}
-			if i == 2195 { // pre-wipe: drifts at max — capture the money picture
+			if i == 2195 { // capture the money picture at max drift
 				picAt2195 = asciiBottom(emu)
 			}
 			if i == 700 { // mid-storm health: fcnt must be alive
@@ -356,7 +357,7 @@ func TestSnowPlus2Run(t *testing.T) {
 			}
 		}
 		if bandNonZero60 < 100 {
-			t.Errorf("f60: band has only %d non-zero bytes — strip bake dead (want >100: text must be visible)", bandNonZero60)
+			t.Errorf("band has only %d non-zero bytes after f400 — strip bake dead (want >100: text must be visible)", bandNonZero60)
 		}
 		// A band sample taken mid-SBAND can legitimately alias to the
 		// previous frame — occasional single-frame collisions are probe
@@ -368,7 +369,7 @@ func TestSnowPlus2Run(t *testing.T) {
 		if bandBadFlakes > 0 {
 			t.Errorf("%d live flake records parked in the scroller band (y176-191) — snow-floor reserve broken", bandBadFlakes)
 		}
-		t.Logf("scroller: band moved %d/%d window frames; f60 band non-zero bytes = %d; max flakes-in-band = %d",
+		t.Logf("scroller: band moved %d/%d window frames; post-lead-in band non-zero bytes = %d; max flakes-in-band = %d",
 			bandMotion, bandWin, bandNonZero60, bandBadFlakes)
 		// Border-profile gate (Seva's diagnostic): concatenated border stream
 		// must be the global repeating pattern RED $E2(vsync ISR) ->
@@ -569,15 +570,19 @@ func TestSnowPlus2Run(t *testing.T) {
 		if !(sumAt[600] < sumAt[1200] && sumAt[1200] < sumAt[1800]) {
 			t.Errorf("drift NOT accumulating: sumH 600=%d 1200=%d 1800=%d", sumAt[600], sumAt[1200], sumAt[1800])
 		}
-		// The 2200-frame cycle must complete: wipe fires at ~f2202, and by
-		// f2500 cycle #2 has only ~300 frames of accumulation — less than
-		// half the pre-wipe mass proves the map was wiped and a new storm
-		// is genuinely landing flakes (not just residual drift).
-		if sumAt[2500]*2 >= sumAt[2195] {
-			t.Errorf("no wipe/restart: sumH f2500=%d vs pre-wipe f2195=%d", sumAt[2500], sumAt[2195])
+		// 2026-10-01 (Seva seamless-loop): NO mid-run wipe. The skyline
+		// self-caps at $28 px/col and must only GROW across the old wipe
+		// points — mass at f2500 >= pre-wipe f2195 proves continuity of
+		// gathered snow. Storm cycle keeps running (flakes keep landing).
+		if sumAt[2500] < sumAt[2195] {
+			t.Errorf("seamless-loop violated: snow mass dropped %d -> %d across f2195..f2500 (wipe crept back?)",
+				sumAt[2195], sumAt[2500])
+		}
+		if sumAt[2500] <= sumAt[600] {
+			t.Errorf("no growth across run: sumH f600=%d f2500=%d", sumAt[600], sumAt[2500])
 		}
 		if ph := emu.mem.Read(phaseAddr); ph != 0 {
-			t.Errorf("phase=%d at f2600 — cycle restart dead (want 0: second storm)", ph)
+			t.Logf("phase=%d at end (storm cycle state; informational)", ph)
 		}
 		// Motion: pixel content must differ on >=90% of mid-run frames.
 		midFrames := 1400
