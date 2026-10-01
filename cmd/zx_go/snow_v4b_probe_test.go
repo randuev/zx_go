@@ -159,7 +159,7 @@ t.Logf("anchors: e3=%04X loop=%04X halt=%04X", e3A, loopA, haltA)
 			continue
 		}
 		f := strings.Fields(ln)
-		if len(f) != 2 || len(f[1]) != 512 {
+		if len(f) != 2 || len(f[1]) != 1024 {
 			t.Fatalf("bad golden line: %q", ln[:min(len(ln), 40)])
 		}
 		bs, err := hex.DecodeString(f[1])
@@ -210,10 +210,13 @@ t.Logf("anchors: e3=%04X loop=%04X halt=%04X", e3A, loopA, haltA)
 	emu.mem.Write(kfullA+1, 0xC9)
 
 	readBand := func() []byte {
-		b := make([]byte, 256)
+		// 16-row band y176..191 (font x2): char row 22 -> y176..183 at
+		// $10C0+$100*n, char row 23 -> y184..191 at $10E0+$100*n.
+		b := make([]byte, 512)
 		pg := emu.mem.RAM8KPage(10)
-		for r := 0; r < 8; r++ {
-			copy(b[r*32:r*32+32], pg[0x10E0+r*0x100:])
+		for rr := 0; rr < 16; rr++ {
+			off := 0x10C0 + (rr&7)*0x100 + (rr>>3)*0x20
+			copy(b[rr*32:], pg[off:])
 		}
 		return b
 	}

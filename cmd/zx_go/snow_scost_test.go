@@ -216,7 +216,10 @@ func TestSnowScrollerCost(t *testing.T) {
 	if tiny > 0 {
 		t.Errorf("anchor polluted: %d cycles <16T (halt M1 refetch?)", tiny)
 	}
-	if cycWorst > 55000 {
-		t.Errorf("post-drain cycle worst %dT exceeds 55k budget", cycWorst)
+	// Gate 55k -> 60k (2026-10-01): font x2 vertical stretch adds ~5.5k T
+	// of LDIR row-mirrors to every scroller pass. Budget frame = 69,888 T;
+	// 60k keeps a ~10k vsync-slack margin (E0->E3 re-arm headroom).
+	if cycWorst > 60000 {
+		t.Errorf("post-drain cycle worst %dT exceeds 60k budget", cycWorst)
 	}
 }
