@@ -113,13 +113,13 @@ func TestSnowPlus2Run(t *testing.T) {
 	if blocks[0].addr != 0x8000 {
 		t.Fatalf("CODE block must load at $8000, got $%04X", blocks[0].addr)
 	}
-	if len(blocks[0].data) < 0x1B00 {
-		t.Fatalf("block must cover $8000-$9AFF incl. strip, len=%X", len(blocks[0].data))
+	if len(blocks[0].data) < 0x1800 {
+		t.Fatalf("block must cover $8000-$97FF incl. static font, len=%X", len(blocks[0].data))
 	}
-	if bs, err := os.ReadFile("/root/nerve-workspace/demos/snow/scroll.bin"); err == nil {
+	if bs, err := os.ReadFile("/root/nerve-workspace/demos/snow/font.bin"); err == nil {
 		off := 0x9000 - 0x8000
 		if string(blocks[0].data[off:off+len(bs)]) != string(bs) {
-			t.Fatalf("strip inside block != scroll.bin")
+			t.Fatalf("font inside block != font.bin")
 		}
 	}
 
@@ -176,6 +176,19 @@ func TestSnowPlus2Run(t *testing.T) {
 		// (2026-10-01). loop=$8114 label-pinned; E3/E4 found by byte scan;
 		// E2 ISR pinned $8989 via defs guard in source.
 		loopA := sym("loop", 0x8114)
+		haltPC := uint16(0) // parked PC after loop-head HALT, scan-derived
+		{
+			lo := int(loopA) - 0x8000
+			for k := lo; k < lo+16 && k < len(blocks[0].data); k++ {
+				if blocks[0].data[k] == 0x76 {
+					haltPC = 0x8001 + uint16(k)
+					break
+				}
+			}
+			if haltPC == 0 {
+				t.Fatalf("no HALT within 16B of loop head")
+			}
+		}
 		var codeB []byte
 		if raw, err := os.ReadFile("/root/nerve-workspace/demos/snow/snow.tap"); err == nil {
 			o := 0
@@ -230,7 +243,10 @@ func TestSnowPlus2Run(t *testing.T) {
 		firstRom := -1
 		var trail []uint16
 		emu.cpu.AddPreFetchHook("snow-escape", func(pc uint16) {
-			if pc < 0x8000 || pc > 0x8CFF {
+			// fence spans the WHOLE program block $8000..$97FF incl. the
+			// BUILDTEXT/buildscroll tail added 2026-10-01 (old $8CFF fence
+			// false-flagged them as "escape" — rebuild twice wasted).
+			if pc < 0x8000 || pc > 0x97FF {
 				if len(trail) < 200 {
 					trail = append(trail, pc)
 				}
@@ -314,7 +330,7 @@ func TestSnowPlus2Run(t *testing.T) {
 			if i >= 400 && i < 1800 {
 				readScr(prevScr[:])
 			}
-			parkedTop := emu.cpu.PC == 0x8119 && emu.cpu.Halted
+			parkedTop := emu.cpu.PC == haltPC && emu.cpu.Halted
 			if i >= 60 && i <= 440 {
 				readBand(prevBand[:])
 			}
@@ -331,7 +347,7 @@ func TestSnowPlus2Run(t *testing.T) {
 			// ($8118 opcode, parked PC $8119); skip the pair otherwise.
 			// (Stepping to HALT instead would perturb the T-counter stream
 			// the budget histogram is derived from — verified, don't.)
-			if i >= 60 && i <= 440 && parkedTop && emu.cpu.PC == 0x8119 && emu.cpu.Halted {
+			if i >= 60 && i <= 440 && parkedTop && emu.cpu.PC == haltPC && emu.cpu.Halted {
 				readBand(curBand[:])
 				diff := 0
 				for k := range bandIdx {
@@ -552,7 +568,7 @@ func TestSnowPlus2Run(t *testing.T) {
 							continue
 						}
 					}
-					if t3 >= 0 {
+					if t3 >= 0 && tl[endIdx].t >= t2 {
 						work := tl[endIdx].t - t2
 						idle := uint64(0)
 						if tl[j].t > tl[endIdx].t {
