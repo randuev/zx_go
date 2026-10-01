@@ -71,11 +71,22 @@ func TestSnowScrollerCost(t *testing.T) {
 	emu.cpu.PC = 0x8000
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
-	emu.mem.Write(0x8369, 0xAF) // kfull stub: no ghost-key quits
-	emu.mem.Write(0x836A, 0xC9)
-
-	sbSites := []uint16{0x8470, 0x84A3, 0x84D6, 0x8509, 0x853C, 0x856F, 0x85A2, 0x85D5}
+	// generation switch: SNOW_GEN=v4b for the counted-shift baseline tap
+	gen := os.Getenv("SNOW_GEN")
+	var sbSites []uint16
+	var e3A, intA, kfullStub uint16
+	switch gen {
+	case "v4b":
+		sbSites = []uint16{0x8470, 0x84A3, 0x84D6, 0x8509, 0x853C, 0x856F, 0x85A2, 0x85D5}
+		e3A, intA, kfullStub = 0x81D3, 0x8989, 0x835D
+	default: // v4c2 flat
+		sbSites = []uint16{0x8487, 0x84B9, 0x84EB, 0x851D, 0x854F, 0x8581, 0x85B3, 0x85E5}
+		e3A, intA, kfullStub = 0x81D3, 0x8989, 0x8375
+	}
 	svalA := uint16(0x8CA0)
+	emu.mem.Write(kfullStub, 0xAF) // kfull stub: no ghost-key quits
+	emu.mem.Write(kfullStub+1, 0xC9)
+
 
 	var lastAt [8]int64      // last Tstates at each .sb site
 	var lastS [8]uint8        // sval in force at that hit
@@ -93,6 +104,7 @@ func TestSnowScrollerCost(t *testing.T) {
 	}
 	var e0, e3cnt, ints int
 	var tE0Prev int64 = -1
+	var loopCy []int64
 
 	emu.cpu.AddPreFetchHook("cost", func(pc uint16) {
 		t := int64(emu.cpu.Tstates())
@@ -122,7 +134,7 @@ func TestSnowScrollerCost(t *testing.T) {
 			return
 		}
 		switch pc {
-		case 0x81D1: // E3: paint start; sval finalized INSIDE sscroll, so
+		case e3A: // E3: paint start; sval finalized INSIDE sscroll, so
 			// the phase key is anchored at row-0's first column below.
 			e3cnt++
 			tE3 = t
@@ -133,6 +145,9 @@ func TestSnowScrollerCost(t *testing.T) {
 			}
 		case 0x8114: // E0: paint finished, back at loop head
 			e0++
+			if tE0Prev >= 0 && t >= tE0Prev {
+				loopCy = append(loopCy, t-tE0Prev)
+			}
 			if tE3 >= 0 && t >= tE3 { // spans crossing T-wrap are dropped
 				n := 0
 				for _, c := range colDeltas {
@@ -147,7 +162,7 @@ func TestSnowScrollerCost(t *testing.T) {
 				tE3 = -1
 			}
 			tE0Prev = t
-		case 0x8989:
+		case intA:
 			ints++
 		}
 	})
@@ -209,6 +224,19 @@ func TestSnowScrollerCost(t *testing.T) {
 			maxSpan, worstU = r.span, r.s
 		}
 		spanBy[r.s] = append(spanBy[r.s], r.span)
+	}
+	if len(loopCy) > 0 {
+		var mx int64
+		var sum int64
+		for _, v := range loopCy {
+			sum += v
+			if v > mx {
+				mx = v
+			}
+		}
+		fmt.Printf("LOOP CYCLE: n=%d avg=%d max=%d (%.1f%% of 69888)\n",
+			len(loopCy), sum/int64(len(loopCy)), mx,
+			float64(mx)/69888.0*100.0)
 	}
 	fmt.Printf("SCROLLER span: avg=%d max=%d (worst s=%d)\n",
 		sumSpan/uint64(len(frameRecs)), maxSpan, worstU)
