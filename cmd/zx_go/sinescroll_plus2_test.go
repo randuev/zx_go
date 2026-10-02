@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
+	"fmt"
 	"hash/crc32"
 	"os"
 	"strconv"
@@ -83,6 +84,7 @@ func TestSinescrollPlus2Run(t *testing.T) {
 	fcntAddr := sym("fcnt", 0x8E09)
 	cbAddr := sym("cb", 0x8E0F)
 	haltAddr := sym("lhalt", 0x8118)
+	tailHits := 0 // captures at halt+1 park = committed stable frame
 	t.Logf("syms: p=$%04X lvl=$%04X hh=$%04X kcnt=$%04X fcnt=$%04X cb=$%04X halt=$%04X",
 		pAddr, lvlAddr, hhAddr, kcntAddr, fcntAddr, cbAddr, haltAddr)
 
@@ -202,12 +204,97 @@ func TestSinescrollPlus2Run(t *testing.T) {
 		var prevScr [6144]byte
 		yMin, yMax := 999, -1
 		inkRows := map[int]int{}
+		parked8, parked16 := uint16(0), uint16(0)
 		for i := 0; i < 900; i++ {
 			if i >= 60 {
 				copy(prevScr[:], emu.mem.RAM8KPage(10)[:6144])
 			}
+			// Parked at loop-head HALT = previous frame FULLY painted —
+			// capture coherent screens here, never mid-walk (overrun frames
+			// would show half-drawn garbage).
+			if pc := emu.cpu.PC; pc == haltAddr+1 {
+				lvl := emu.mem.Read(lvlAddr)
+				if (lvl == 0 && parked8 == 0) || (lvl == 1 && parked16 == 0) {
+					var raw []byte
+					lit := 0
+					for y := 0; y < 192; y++ {
+						for xb := 0; xb < 32; xb++ {
+							o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + xb
+							bb := emu.mem.RAM8KPage(10)[o]
+							for bit := 0; bit < 8; bit++ {
+								v := byte(0)
+								if bb&(0x80>>bit) != 0 {
+									v = 255
+									lit++
+								}
+								raw = append(raw, v, v, v)
+							}
+						}
+					}
+					if lit < 2000 && i%20 == 3 {
+						b := strings.Builder{}
+						for y := 0; y < 192; y++ {
+							for x := 0; x < 256; x++ {
+								o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + (x >> 3)
+								if emu.mem.RAM8KPage(10)[o]&(0x80>>(x&7)) != 0 {
+									b.WriteString("#")
+								} else {
+									b.WriteString(".")
+								}
+							}
+							b.WriteString("\n")
+						}
+						t.Logf("PARK ASCII f%d lvl=%d p=%d lit=%d\n%s", i, lvl, pVal(emu), lit, b.String())
+					}
+					if lit < 2000 {
+						t.Logf("park f%d lvl=%d p=%d thin cap lit=%d — keep waiting", i, lvl, pVal(emu), lit)
+					} else if lvl == 0 {
+						parked8 = 1
+						t.Logf("PARKED CAP h8 f%d p=%d lit=%d", i, pVal(emu), lit)
+						if err := writePNG("/tmp/sine_h8.png", 256, 192, raw); err != nil {
+							t.Errorf("png h8: %v", err)
+						}
+					} else {
+						parked16 = 1
+						t.Logf("PARKED CAP h16 f%d p=%d lit=%d", i, pVal(emu), lit)
+						if err := writePNG("/tmp/sine_h16.png", 256, 192, raw); err != nil {
+							t.Errorf("png h16: %v", err)
+						}
+					}
+				}
+			}
 			runOneFrameHeadless(emu, roms.ModelPlus2)
 			lvl := emu.mem.Read(lvlAddr)
+			// Stable capture: loop tail = frame FULLY drawn, ink committed.
+			// Grabs one readable ASCII+PNG per zoom level (SINESCROLL_ASCII).
+			if os.Getenv("SINESCROLL_ASCII") != "" && tailHits < 24 && emu.cpu.PC == haltAddr+1 && i%8 == 0 {
+				lvlAt := emu.mem.Read(lvlAddr)
+				tag := "h8"
+				if lvlAt == 1 {
+					tag = "h16"
+				}
+				fn := fmt.Sprintf("/tmp/sine_park_%s_%d.png", tag, tailHits)
+				var raw []byte
+				lit := 0
+				for y := 0; y < 192; y++ {
+					for xb := 0; xb < 32; xb++ {
+						o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + xb
+						bb := emu.mem.RAM8KPage(10)[o]
+						for bit := 0; bit < 8; bit++ {
+							v := byte(0)
+							if bb&(0x80>>bit) != 0 {
+								v = 255
+								lit++
+							}
+							raw = append(raw, v, v, v)
+						}
+					}
+				}
+				if writePNG(fn, 256, 192, raw) == nil {
+					t.Logf("tailcap %s f%d p=%d lit=%d -> %s", tag, i, pVal(emu), lit, fn)
+				}
+				tailHits++
+			}
 			lvlSeen[lvl]++
 			if hh := emu.mem.Read(hhAddr); hh == 0 || hh == 8 || hh == 16 {
 				if (lvl == 0 && hh == 8) || (lvl == 1 && hh == 16) {
