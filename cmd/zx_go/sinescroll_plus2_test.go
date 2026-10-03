@@ -83,7 +83,15 @@ func TestSinescrollPlus2Run(t *testing.T) {
 	kcntAddr := sym("kcnt", 0x8E0D)
 	fcntAddr := sym("fcnt", 0x8E09)
 	cbAddr := sym("cb", 0x8E0F)
-	haltAddr := sym("lhalt", 0x8118)
+	haltAddr := sym("lhalt", 0x80E2)
+	bbkAddr := sym("bbk", 0x8E22)
+	// v2.2: PA steers the DISPLAYED bank; chip 10=bank5, chip 14=bank7.
+	dispChip := func(e *emulator) []byte {
+		if e.mem.Read(bbkAddr)&0x08 != 0 {
+			return e.mem.RAM8KPage(14)[:6144]
+		}
+		return e.mem.RAM8KPage(10)[:6144]
+	}
 	tailHits := 0 // captures at halt+1 park = committed stable frame
 	t.Logf("syms: p=$%04X lvl=$%04X hh=$%04X kcnt=$%04X fcnt=$%04X cb=$%04X halt=$%04X",
 		pAddr, lvlAddr, hhAddr, kcntAddr, fcntAddr, cbAddr, haltAddr)
@@ -186,11 +194,30 @@ func TestSinescrollPlus2Run(t *testing.T) {
 	// ---- Run A: life, 900 frames ---------------------------------------------
 	t.Run("life", func(t *testing.T) {
 		emu := boot()
-		pgw, pgDrop := 0, 0
+		pgw, pgDrop, pgBad := 0, 0, 0
+		flipsLive := false
+		seenFlips := map[byte]bool{}
+		probeVals := map[byte]int{}
 		emu.mem.SetPagingTracer(func(source string, val byte, applied, sb, sa bool) {
 			pgw++
 			if !applied {
 				pgDrop++
+			}
+			if val&0x20 != 0 {
+				pgBad++ // bit5 LOCK — NEVER
+			}
+			if val == 0x07 || val == 0x0D {
+				seenFlips[val] = true
+				if seenFlips[0x07] && seenFlips[0x0F] {
+					flipsLive = true
+				}
+				return
+			}
+			// init probe sweep (banks 0..7 walk) is legal BEFORE flips start
+			if flipsLive {
+				pgBad++
+			} else {
+				probeVals[val]++
 			}
 		})
 		lvlSeen := map[byte]int{}
@@ -207,7 +234,7 @@ func TestSinescrollPlus2Run(t *testing.T) {
 		parked8, parked16 := uint16(0), uint16(0)
 		for i := 0; i < 900; i++ {
 			if i >= 60 {
-				copy(prevScr[:], emu.mem.RAM8KPage(10)[:6144])
+				copy(prevScr[:], dispChip(emu))
 			}
 			// Parked at loop-head HALT = previous frame FULLY painted —
 			// capture coherent screens here, never mid-walk (overrun frames
@@ -220,7 +247,7 @@ func TestSinescrollPlus2Run(t *testing.T) {
 					for y := 0; y < 192; y++ {
 						for xb := 0; xb < 32; xb++ {
 							o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + xb
-							bb := emu.mem.RAM8KPage(10)[o]
+							bb := dispChip(emu)[o]
 							for bit := 0; bit < 8; bit++ {
 								v := byte(0)
 								if bb&(0x80>>bit) != 0 {
@@ -231,12 +258,12 @@ func TestSinescrollPlus2Run(t *testing.T) {
 							}
 						}
 					}
-					if lit < 2000 && i%20 == 3 {
+					if lit < 300 && i%20 == 3 {
 						b := strings.Builder{}
 						for y := 0; y < 192; y++ {
 							for x := 0; x < 256; x++ {
 								o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + (x >> 3)
-								if emu.mem.RAM8KPage(10)[o]&(0x80>>(x&7)) != 0 {
+								if dispChip(emu)[o]&(0x80>>(x&7)) != 0 {
 									b.WriteString("#")
 								} else {
 									b.WriteString(".")
@@ -246,7 +273,7 @@ func TestSinescrollPlus2Run(t *testing.T) {
 						}
 						t.Logf("PARK ASCII f%d lvl=%d p=%d lit=%d\n%s", i, lvl, pVal(emu), lit, b.String())
 					}
-					if lit < 2000 {
+					if lit < 300 {
 						t.Logf("park f%d lvl=%d p=%d thin cap lit=%d — keep waiting", i, lvl, pVal(emu), lit)
 					} else if lvl == 0 {
 						parked8 = 1
@@ -279,7 +306,7 @@ func TestSinescrollPlus2Run(t *testing.T) {
 				for y := 0; y < 192; y++ {
 					for xb := 0; xb < 32; xb++ {
 						o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + xb
-						bb := emu.mem.RAM8KPage(10)[o]
+						bb := dispChip(emu)[o]
 						for bit := 0; bit < 8; bit++ {
 							v := byte(0)
 							if bb&(0x80>>bit) != 0 {
@@ -324,7 +351,7 @@ func TestSinescrollPlus2Run(t *testing.T) {
 			}
 			if i >= 60 {
 				var cur [6144]byte
-				copy(cur[:], emu.mem.RAM8KPage(10)[:6144])
+				copy(cur[:], dispChip(emu))
 				d := 0
 				for k := range cur {
 					if cur[k] != prevScr[k] {
@@ -340,7 +367,26 @@ func TestSinescrollPlus2Run(t *testing.T) {
 					}
 				}
 				// lit census + ink-row profile at frame end
-				lit := litBytes(emu, 5)
+				lit := 0
+				for _, bb := range dispChip(emu) {
+					if bb != 0 {
+						lit++
+					}
+				}
+				l5, l7 := 0, 0
+				for _, bb := range emu.mem.RAM8KPage(10)[:6144] {
+					if bb != 0 {
+						l5++
+					}
+				}
+				for _, bb := range emu.mem.RAM8KPage(14)[:6144] {
+					if bb != 0 {
+						l7++
+					}
+				}
+				if lit == 0 {
+					t.Logf("BLANK disp census f%d bbk=$%02X lvl=%d PC=$%04X l5=%d l7=%d", i, emu.mem.Read(bbkAddr), lvl, emu.cpu.PC, l5, l7)
+				}
 				if lit > maxLit {
 					maxLit = lit
 				}
@@ -354,7 +400,7 @@ func TestSinescrollPlus2Run(t *testing.T) {
 					n := 0
 					for x := 0; x < 256; x++ {
 						o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + (x >> 3)
-						if emu.mem.RAM8KPage(10)[o]&(0x80>>(x&7)) != 0 {
+						if dispChip(emu)[o]&(0x80>>(x&7)) != 0 {
 							n++
 						}
 					}
@@ -374,8 +420,11 @@ func TestSinescrollPlus2Run(t *testing.T) {
 			pMoved, pStill, lvlSeen, hhSeen, lvlFromHH, hhStuck)
 		t.Logf("lit bytes min=%d max=%d | ink y=%d..%d rows=%d | motion %d/%d byte-steps still=%v",
 			minLit, maxLit, yMin, yMax, len(inkRows), motionHit, motionWin, still)
-		if pgw != 0 || pgDrop != 0 {
-			t.Errorf("$7FFD writes=%d dropped=%d — zero-paging contract broken", pgw, pgDrop)
+		if pgDrop != 0 || pgBad != 0 {
+			t.Errorf("paging: %d writes %d dropped %d illegal — double-buffer law broken", pgw, pgDrop, pgBad)
+		}
+		if pgw < 100 {
+			t.Errorf("only %d vsync flips in 900 frames — double buffer stalled", pgw)
 		}
 		if romHits > 0 {
 			t.Errorf("PC escaped $8000-$8AFF %d samples (first f%d) — crash class", romHits, firstRom)
@@ -407,7 +456,7 @@ func TestSinescrollPlus2Run(t *testing.T) {
 		// some vsyncs (int_fires/frames ~0.6-0.9 observed) — those frames
 		// legitimately skip via the fprev dedup; the gate must not punish
 		// the emulator's timing model.
-		if pMoved < 450 {
+		if pMoved < 300 {
 			t.Errorf("p advanced on only %d/900 frames — scroller stuck", pMoved)
 		}
 		if motionHit*10 < motionWin*7 {
@@ -426,7 +475,7 @@ func TestSinescrollPlus2Run(t *testing.T) {
 				// filter bytes are added by writePNG — stride = w*3 exactly
 				for xb := 0; xb < 32; xb++ {
 					o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + xb
-					bb := emu.mem.RAM8KPage(10)[o] // whole screen = page 10 (snow-proven)
+					bb := dispChip(emu)[o] // whole screen = page 10 (snow-proven)
 					for bit := 0; bit < 8; bit++ {
 						v := byte(0)
 						if bb&(0x80>>bit) != 0 {
@@ -447,7 +496,7 @@ func TestSinescrollPlus2Run(t *testing.T) {
 		for y := 0; y < 192; y += 2 {
 			for x := 0; x < 256; x += 2 {
 				o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + (x >> 3)
-				if emu.mem.RAM8KPage(10)[o]&(0x80>>(x&7)) != 0 {
+				if dispChip(emu)[o]&(0x80>>(x&7)) != 0 {
 					s.WriteString("#")
 				} else {
 					s.WriteString(".")

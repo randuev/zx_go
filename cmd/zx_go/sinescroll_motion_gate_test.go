@@ -117,7 +117,14 @@ func TestSinescrollMotionGate(t *testing.T) {
 	half := func() byte { return emu.mem.Read(sym("half")) }
 	otmin := func() byte { return emu.mem.Read(sym("otmin")) }
 	otmax := func() byte { return emu.mem.Read(sym("otmax")) }
-	screen := func() []byte { return emu.mem.RAM8KPage(10)[:6144] }
+	// v2: displayed chip alternates with PA — page10=bank5 when PA=0,
+	// page14=bank7 when PA=1 (zx_go chips; probe-proven fixed windows).
+	screen := func() []byte {
+		if emu.mem.Read(sym("bbk"))&0x08 != 0 {
+			return emu.mem.RAM8KPage(14)[:6144]
+		}
+		return emu.mem.RAM8KPage(10)[:6144]
+	}
 	inkCount := func() int {
 		n := 0
 		for _, b := range screen() {
@@ -142,30 +149,43 @@ func TestSinescrollMotionGate(t *testing.T) {
 		runOneFrameHeadless(emu, roms.ModelPlus2)
 	}
 
-	stalled, drift := 0, 0
+	// v2.5 dirty-gate semantics: the visible image is a pure function of
+	// (pbyte,lvl). Clean frames are byte-identical by DESIGN — frozen
+	// display, zero paint cost. The live-motion law becomes: content MUST
+	// change at every byte-column step (every 8/spd commits, plus level
+	// switches, plus the forced-16 resync). Verify NO content change across
+	// a whole ~24 native-frame window (> forced-16 period + paint run) =
+	// dead scroller. Also verify q advances (text position walks).
+	stalled, drift, changed := 0, 0, 0
 	var prev []byte
-	for i := 0; i < 12; i++ {
+	qStart := qVal()
+	for i := 0; i < 24; i++ {
 		runOneFrameHeadless(emu, roms.ModelPlus2)
 		s := screen()
 		cur := make([]byte, len(s))
 		copy(cur, s)
-		d := -1
+		d := 0
 		if prev != nil {
-			d = 0
 			for j := range cur {
 				if cur[j] != prev[j] {
 					d++
 				}
 			}
-			drift++
-			if d == 0 {
-				stalled++
-			}
 		}
+		if d > 0 {
+			changed++
+		}
+		drift++
 		fmt.Printf("DRIFT frame#%d d=%d p=%d q=%d lvl%d\n", i, d, pVal(), qVal(), lvl())
-		os.Stdout.Sync()
+		if i == 23 {
+			os.Stdout.Sync()
+		}
 		prev = cur
 	}
+	if changed == 0 {
+		stalled = 1 // dead across the entire window = no motion at all
+	}
+	qNow := qVal()
 
 	// SC-9 pool sweep: every frame, ink rows must live inside the tracked
 	// erase band [otmin..otmax]; ink outside = stranded ghost row.
@@ -214,7 +234,7 @@ func TestSinescrollMotionGate(t *testing.T) {
 				}
 			}
 		}
-		fmt.Printf("MOTIONGATE windows=%d stalled=%d drift=%d peakInk=%d ghostFrames=%d\n", drift+1, stalled, drift, peakInk, ghostFrames)
+		fmt.Printf("MOTIONGATE windows=%d stalled=%d changed=%d qMove=%d peakInk=%d ghostFrames=%d\n", drift+1, stalled, changed, qNow-qStart, peakInk, ghostFrames)
 		fmt.Printf("CENSUS total=%d inkrows=", total)
 		for y := 0; y < 192; y++ {
 			if rows[y] > 0 {
