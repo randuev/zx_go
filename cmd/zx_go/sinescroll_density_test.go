@@ -44,11 +44,11 @@ func TestSinescrollDensity(t *testing.T) {
 	}
 	pAddr := sym("p", 0x8E00)
 	lvlAddr := sym("lvl", 0x8E06)
-	procAddr := sym("proc", 0x8083)
+	loopAddr := sym("loop", 0x80DD)
 	textAddr := sym("TEXT", 0x9B00)
 	ebAddr := sym("eraseband", 0x8258)
 	walkAddr := sym("walk", 0x8155)
-	lhaltAddr := sym("lhalt", 0x8075) // CPU parks at halt+1 while awaiting vsync
+	lhaltAddr := sym("lhalt", 0x80E2) // CPU parks at halt+1 while awaiting vsync
 
 	prev := cliFlagsActive
 	nf := cliFlags{}
@@ -183,7 +183,7 @@ func TestSinescrollDensity(t *testing.T) {
 					}
 				}
 			}
-			if emu.cpu.PC == procAddr {
+			if emu.cpu.PC == loopAddr {
 				break
 			}
 		}
@@ -192,9 +192,12 @@ func TestSinescrollDensity(t *testing.T) {
 				parks, emu.mem.Read(lvlAddr), ebT, ebBlocks, wkT,
 				emu.mem.Read(sym("otmin", 0x8E18)), emu.mem.Read(sym("otmax", 0x8E19)))
 		}
-		if work > 69888 {
+		// v2.5 budget law: a repaint park (erase+walk+bandsave of the HIDDEN
+		// bank) legitimately spans >1 frame; cap at 230000T (measured legit
+		// max paint span 160166T + slack). The old 69888 gate was v1-era.
+		if work > 230000 {
 			overruns++
-			t.Logf("OVERRUN park#%d lvl%d wall=%d work=%d (>69888)", parks, emu.mem.Read(lvlAddr), wall, work)
+			t.Logf("OVERRUN park#%d lvl%d wall=%d work=%d (>230000)", parks, emu.mem.Read(lvlAddr), wall, work)
 		}
 		if work > maxWork {
 			maxWork = work
@@ -222,7 +225,11 @@ func TestSinescrollDensity(t *testing.T) {
 				pred++
 			}
 		}
-		// actual distinct pixel-cluster start positions
+		// actual distinct pixel-cluster start positions (bank-aware DISPLAY)
+		dispPage := 10
+		if emu.mem.Read(sym("bbk", 0x8E22))&0x08 != 0 {
+			dispPage = 14
+		}
 		starts := []int{}
 		run := -1
 		for c := 0; c < 256; c++ {
@@ -230,7 +237,7 @@ func TestSinescrollDensity(t *testing.T) {
 			ink := false
 			for y := 0; y < 192 && !ink; y++ {
 				o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + xb
-				if emu.mem.RAM8KPage(10)[o] != 0 {
+				if emu.mem.RAM8KPage(dispPage)[o] != 0 {
 					ink = true
 				}
 			}
@@ -280,7 +287,7 @@ func TestSinescrollDensity(t *testing.T) {
 				for y := 0; y < 192; y++ {
 					for x := 0; x < 256; x++ {
 						o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + (x >> 3)
-						v := emu.mem.RAM8KPage(10)[o] & (0x80 >> (x & 7))
+						v := emu.mem.RAM8KPage(dispPage)[o] & (0x80 >> (x & 7))
 						i := (y*256 + x) * 3
 						if v != 0 {
 							raw[i], raw[i+1], raw[i+2] = 0xFF, 0xFF, 0xFF
@@ -302,7 +309,7 @@ func TestSinescrollDensity(t *testing.T) {
 			for y := 0; y < 192; y++ {
 				for x := 0; x < 256; x++ {
 					o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + (x >> 3)
-					if emu.mem.RAM8KPage(10)[o]&(0x80>>(x&7)) != 0 {
+					if emu.mem.RAM8KPage(dispPage)[o]&(0x80>>(x&7)) != 0 {
 						b.WriteString("#")
 					} else {
 						b.WriteString(".")
