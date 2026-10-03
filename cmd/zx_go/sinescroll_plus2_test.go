@@ -145,21 +145,21 @@ func TestSinescrollPlus2Run(t *testing.T) {
 		t.Fatalf("expected exactly 1 CODE block (single-block contract), got %d", len(blocks))
 	}
 	b := blocks[0]
-	if b.addr != 0x8000 || len(b.data) != 0x22F0 {
+	if b.addr != 0x8000 || len(b.data) != 0x34C0 {
 		t.Fatalf("block must be $8000 len $22F0, got addr=$%04X len=$%X", b.addr, len(b.data))
 	}
 	// bake integrity spot-checks INSIDE the loaded block
 	at := func(a uint16) []byte { return b.data[a-0x8000:] }
-	if !(at(0x9800)[0] == 96 && at(0x9900)[0] == 0x00 && at(0x9900)[1] == 0x40 &&
-		at(0x9900)[2] == 0x00 && at(0x9900)[3] == 0x41) {
-		t.Fatalf("YOFFB/DEFTAB bake wrong at block offsets")
+	if !(at(0x9800)[0] == 96 && at(0x9980)[0] == 0x00 && at(0x9980)[1] == 0x40 &&
+		at(0x9980)[2] == 0x00 && at(0x9980)[3] == 0x41) {
+		t.Fatalf("YOFFB/DEFTAB bake wrong at block offsets (DEFTAB base $9980 v3)")
 	}
 	// TEXT must start "In 1979" (ascii baked raw)
 	if string(at(0x9B00)[:7]) != "In 1979" {
 		t.Fatalf("TEXT bake corrupted: %q", string(at(0x9B00)[:7]))
 	}
 	// CHARID must map 'I' (0x49) to a valid sheet idx
-	if at(0x9A80+0x49)[0] == 0xFF {
+	if at(0x9A80 + 0x49)[0] == 0xFF {
 		t.Fatalf("CHARID['I'] = FF — map dead")
 	}
 
@@ -226,16 +226,15 @@ func TestSinescrollPlus2Run(t *testing.T) {
 		pPrev := pVal(emu)
 		pStill, pMoved := 0, 0
 		romHits, firstRom := 0, -1
-		maxLit, minLit := 0, 1 << 30
+		maxLit, minLit := 0, 1<<30
 		motionWin, motionHit, still := 0, 0, []int{}
-		var prevScr [6144]byte
+		var shownImg [2][6144]byte
+		shownSeen := [2]bool{}
+		shownP := [2]int{}
 		yMin, yMax := 999, -1
 		inkRows := map[int]int{}
 		parked8, parked16 := uint16(0), uint16(0)
 		for i := 0; i < 900; i++ {
-			if i >= 60 {
-				copy(prevScr[:], dispChip(emu))
-			}
 			// Parked at loop-head HALT = previous frame FULLY painted —
 			// capture coherent screens here, never mid-walk (overrun frames
 			// would show half-drawn garbage).
@@ -350,22 +349,34 @@ func TestSinescrollPlus2Run(t *testing.T) {
 				}
 			}
 			if i >= 60 {
+				// v3 law (bank-aware, vsync-loss tolerant): whenever a
+				// shown bank (re)appears and p has advanced >= 1 byte since
+				// that bank was last shown, its bitmap MUST differ — the
+				// bank was repainted while hidden. Repeats = stale/parity
+				// ghost class. Frames with no flip are legitimately static.
 				var cur [6144]byte
 				copy(cur[:], dispChip(emu))
-				d := 0
-				for k := range cur {
-					if cur[k] != prevScr[k] {
-						d++
-					}
-				}
-				if i%8 == 0 {
+				tag := (emu.mem.Read(bbkAddr) >> 3) & 1
+				pNow := pVal(emu)
+				if shownSeen[tag] && (pNow>>3) != shownP[tag] {
 					motionWin++
-					if d > 0 {
+					diff := 0
+					for k := range cur {
+						if cur[k] != shownImg[tag][k] {
+							diff++
+						}
+					}
+					if diff > 0 {
 						motionHit++
 					} else if len(still) < 8 {
 						still = append(still, i)
+						t.Logf("STILLDIAG f%d bank=%d lvl=%d p=%d repeatAt=%d — STALE BANK",
+							i, tag, lvl, pNow, shownP[tag])
 					}
 				}
+				shownSeen[tag] = true
+				shownP[tag] = pNow >> 3
+				copy(shownImg[tag][:], cur[:])
 				// lit census + ink-row profile at frame end
 				lit := 0
 				for _, bb := range dispChip(emu) {
@@ -418,7 +429,7 @@ func TestSinescrollPlus2Run(t *testing.T) {
 		}
 		t.Logf("p: moved=%d still=%d | lvl: %v | hh: %v | hh/lvl mismatch=%d stuck0=%d",
 			pMoved, pStill, lvlSeen, hhSeen, lvlFromHH, hhStuck)
-		t.Logf("lit bytes min=%d max=%d | ink y=%d..%d rows=%d | motion %d/%d byte-steps still=%v",
+		t.Logf("lit bytes min=%d max=%d | ink y=%d..%d rows=%d | motion %d/%d frames still=%v",
 			minLit, maxLit, yMin, yMax, len(inkRows), motionHit, motionWin, still)
 		if pgDrop != 0 || pgBad != 0 {
 			t.Errorf("paging: %d writes %d dropped %d illegal — double-buffer law broken", pgw, pgDrop, pgBad)
@@ -460,7 +471,7 @@ func TestSinescrollPlus2Run(t *testing.T) {
 			t.Errorf("p advanced on only %d/900 frames — scroller stuck", pMoved)
 		}
 		if motionHit*10 < motionWin*7 {
-			t.Errorf("content changed on only %d/%d byte-step windows — text frozen", motionHit, motionWin)
+			t.Errorf("shown bank repeated stale content on %d/%d repaint windows — ghost class", motionWin-motionHit, motionWin)
 		}
 		if yMin < 20 || yMax > 170 {
 			t.Errorf("ink escaped sine band: y=%d..%d (want ~34..158)", yMin, yMax)

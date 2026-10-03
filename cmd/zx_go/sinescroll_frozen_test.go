@@ -136,11 +136,9 @@ func TestSinescrollFrozenDisplay(t *testing.T) {
 				break
 			}
 		}
-		// v2.7 byte-grid law: h16 sprites occupy even byte columns (nbb=2);
-		// an odd-pbyte dirty frame repaints the SAME pixels (16px hop is the
-		// accepted v1 tradeoff) — hidden page legitimately unchanged there.
-		oddHop := lvl() == 1 && ((pVal()>>3)&1) == 1
-		if !hiddenDirty && !oddHop {
+		// v3 law: pixel scroll paints new ink EVERY paint frame —
+		// h8 every frame, h16 every pbyte step. No byte-grid exemption.
+		if !hiddenDirty {
 			violNoPaint++
 			pq := (pVal() >> 3) >> uint(lvl())
 			t.Errorf("paint#%d left hidden chip page%d untouched — no draw (p=%d lvl%d q=%d)",
