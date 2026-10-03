@@ -265,10 +265,14 @@ func TestSinescrollTruth(t *testing.T) {
 		if parks%15 == 0 {
 			var rows [192]int
 			total := 0
+			cpg := 10
+			if emu.mem.Read(sym("bbk"))&0x08 != 0 {
+				cpg = 14 // PA=1: display is bank7-chip
+			}
 			for y := 0; y < 192; y++ {
 				for x := 0; x < 256; x++ {
 					o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + (x >> 3)
-					if emu.mem.RAM8KPage(10)[o]&(0x80>>(x&7)) != 0 {
+					if emu.mem.RAM8KPage(cpg)[o]&(0x80>>(x&7)) != 0 {
 						rows[y]++
 						total++
 					}
@@ -299,7 +303,12 @@ func TestSinescrollTruth(t *testing.T) {
 			shot8 = true
 			capScreen(t, emu, "/tmp/truth_h8.png")
 		}
-		if lv == 1 && p() > 7600 {
+		if lv == 0 && parks%9 == 1 {
+			capScreen(t, emu, fmt.Sprintf("/tmp/truth_h8_%d.png", p()))
+		}
+		// v2.7: dwells are short (28 frames) and wrap keeps p<wrap; sample
+		// h16 evenly across parks instead of the stale p>7600 predicate.
+		if lv == 1 && parks%9 == 0 {
 			capScreen(t, emu, fmt.Sprintf("/tmp/truth_h16_%d.png", p()))
 		}
 	}
