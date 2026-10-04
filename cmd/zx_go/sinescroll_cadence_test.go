@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/conorarmstrong/zx_go/pkg/roms"
+	"github.com/conorarmstrong/zx_go/pkg/z80"
 )
 
 // TestSinescrollCadence — the stutter gate (Seva 2026-10-04: "still stutters").
@@ -90,21 +91,24 @@ func TestSinescrollCadence(t *testing.T) {
 	fmt.Printf("CADENCE spd: h8=%d h16=%d\n", sp8, sp16)
 
 	type vs struct {
-		n    int
-		p    int
-		lvl  byte
-		busy uint64
+		n     int
+		p     int
+		lvl   byte
+		taken uint64
+		rej   uint64
 	}
 	var vss []vs
 	frame := 0
+	fb, rb := z80.IntFireCount, z80.IntRejectCount
 	for frame < 300 {
-		tB := emu.cpu.Tstates()
 		runOneFrameHeadless(emu, roms.ModelPlus2)
 		p := int(emu.mem.Read(sym("p"))) | int(emu.mem.Read(sym("p")+1))<<8
 		lvl := emu.mem.Read(sym("lvl"))
-		vss = append(vss, vs{n: frame, p: p, lvl: lvl, busy: emu.cpu.Tstates() - tB})
+		vss = append(vss, vs{n: frame, p: p, lvl: lvl,
+			taken: z80.IntFireCount, rej: z80.IntRejectCount})
 		frame++
 	}
+	_, _ = fb, rb
 	// skip boot frames until the first paint advances p (initial paint
 	// jumps 0->64; frames before it hold p=0 legitimately — not stutter)
 	for len(vss) > 0 && vss[0].p == 0 {
@@ -130,27 +134,24 @@ func TestSinescrollCadence(t *testing.T) {
 			lvl0++
 			if d == 0 {
 				skip0++
-				violStr = append(violStr, fmt.Sprintf("STUT f%d lvl0 p stuck=%d busy=%dT", b.n, b.p, b.busy))
+				violStr = append(violStr, fmt.Sprintf("STUT f%d lvl0 p stuck=%d taken=%d rej=%d", b.n, b.p, b.taken, b.rej))
 			} else if d > spd {
 				dbl0++
-				violStr = append(violStr, fmt.Sprintf("DBL f%d lvl0 p %d->%d busy=%dT", b.n, a.p, b.p, b.busy))
-			}
-			if b.busy > worstBusy && false {
-				worstBusy = b.busy
+				violStr = append(violStr, fmt.Sprintf("DBL f%d lvl0 p %d->%d taken=%d rej=%d", b.n, a.p, b.p, b.taken, b.rej))
 			}
 		} else {
 			lvl1++
 			if d == 0 {
 				skip1++
-				violStr = append(violStr, fmt.Sprintf("STUT f%d lvl1 p stuck=%d busy=%dT", b.n, b.p, b.busy))
+				violStr = append(violStr, fmt.Sprintf("STUT f%d lvl1 p stuck=%d taken=%d rej=%d", b.n, b.p, b.taken, b.rej))
 			} else if d > spd {
 				dbl1++
-				violStr = append(violStr, fmt.Sprintf("DBL f%d lvl1 p %d->%d busy=%dT", b.n, a.p, b.p, b.busy))
+				violStr = append(violStr, fmt.Sprintf("DBL f%d lvl1 p %d->%d taken=%d rej=%d", b.n, a.p, b.p, b.taken, b.rej))
 			}
 		}
 	}
-	fmt.Printf("CADENCE: frames=%d lvl0=%d skip=%d dbl=%d | lvl1=%d skip=%d dbl=%d | trans=%d worstBusy=%dT (budget 69888)\n",
-		len(vss), lvl0, skip0, dbl0, lvl1, skip1, dbl1, trans, worstBusy)
+	fmt.Printf("CADENCE: frames=%d lvl0=%d skip=%d dbl=%d | lvl1=%d skip=%d dbl=%d | trans=%d taken=%d rej=%d (budget 69888)\n",
+		len(vss), lvl0, skip0, dbl0, lvl1, skip1, dbl1, trans, vss[len(vss)-1].taken, vss[len(vss)-1].rej)
 	for i, s := range violStr {
 		if i >= 24 {
 			fmt.Printf("  ... %d more\n", len(violStr)-24)
@@ -169,94 +170,3 @@ func TestSinescrollCadence(t *testing.T) {
 	}
 }
 
-// scratch: per-column census of the displayed page at h8 parks.
-func TestSinescrollColCensus(t *testing.T) {
-	syms := map[string]uint16{}
-	bs, _ := os.ReadFile("/root/nerve-workspace/demos/sinescroll/sinescroll.sym")
-	for _, ln := range strings.Split(string(bs), "\n") {
-		name, rest, ok := strings.Cut(strings.TrimSpace(ln), ":")
-		if !ok {
-			continue
-		}
-		rest = strings.TrimSpace(rest)
-		if strings.HasPrefix(rest, "EQU 0x") {
-			if v, e := strconv.ParseUint(strings.Fields(rest[6:])[0], 16, 16); e == nil {
-				syms[name] = uint16(v)
-			}
-		}
-	}
-	raw, _ := os.ReadFile("/root/nerve-workspace/demos/sinescroll/sinescroll.tap")
-	blocks := parseTap(raw)
-	base, code := blocks[0][0].(uint16), blocks[0][1].([]byte)
-	prev := cliFlagsActive
-	nf := cliFlags{}
-	nf.noSound = true
-	cliFlagsActive = &nf
-	defer func() { cliFlagsActive = prev }()
-	emu, _ := newEmulator(roms.ModelPlus2)
-	emu.paused.Store(false)
-	for i := 0; i < 220; i++ {
-		runOneFrameHeadless(emu, roms.ModelPlus2)
-	}
-	for i, v := range code {
-		emu.mem.Write(base+uint16(i), v)
-	}
-	emu.cpu.SP = 0xFF00
-	emu.cpu.PC = base
-	lhalt := syms["lhalt"]
-	for f := 0; f < 400; f++ {
-		p0 := emu.cpu.PC
-		_ = p0
-		for {
-			tS := emu.cpu.Tstates()
-			budget := uint64(frameTStatesForModel(roms.ModelPlus2))
-			for emu.cpu.Tstates()-tS < budget {
-				if emu.cpu.PC == lhalt && f > 0 {
-					goto parked
-				}
-				emu.cpu.StepInstructionWithIRQ()
-			}
-		}
-	parked:
-		if f < 380 || f > 395 {
-			continue
-		}
-		p := int(emu.mem.Read(syms["p"])) | int(emu.mem.Read(syms["p"]+1))<<8
-		lvl := emu.mem.Read(syms["lvl"])
-		if lvl != 0 {
-			continue
-		}
-		cpg := 10
-		if emu.mem.Read(syms["bbk"])&0x08 != 0 {
-			cpg = 14
-		}
-		page := emu.mem.RAM8KPage(cpg)
-		fmt.Printf("COL p=%d: ", p)
-		for col := 0; col < 32; col++ {
-			ink := 0
-			for yr := 84; yr <= 110; yr++ {
-				o := ((yr & 7) << 8) + ((yr & 0x38) << 2) + ((yr & 0xC0) << 5) + col
-				b := page[o]
-				if b != 0 {
-					ink += bits8[b]
-				}
-			}
-			fmt.Printf("%d ", ink)
-		}
-		fmt.Println()
-	}
-}
-
-var bits8 = [256]int{}
-
-func init() {
-	for i := 0; i < 256; i++ {
-		b := 0
-		for j := 0; j < 8; j++ {
-			if i&(1<<j) != 0 {
-				b++
-			}
-		}
-		bits8[i] = b
-	}
-}
