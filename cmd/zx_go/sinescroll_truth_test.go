@@ -266,7 +266,7 @@ func TestSinescrollTruth(t *testing.T) {
 			var rows [192]int
 			total := 0
 			cpg := 10
-			if emu.mem.Read(sym("bbk"))&0x08 != 0 {
+			if emu.mem.Read(0x8E21)&0x08 != 0 {
 				cpg = 14 // PA=1: display is bank7-chip
 			}
 			for y := 0; y < 192; y++ {
@@ -340,7 +340,7 @@ func capScreen(t *testing.T, emu *emulator, path string) {
 	// bank-aware: PA=1 -> display is bank7 (page14), PA=0 -> bank5 (page10)
 	// (bbk = paging port shadow at $8E22 — v2.5 syms)
 	page := emu.mem.RAM8KPage(10)
-	if emu.mem.Read(0x8E22)&0x08 != 0 {
+	if emu.mem.Read(0x8E21)&0x08 != 0 {
 		page = emu.mem.RAM8KPage(14)
 	}
 	for y := 0; y < 192; y++ {
