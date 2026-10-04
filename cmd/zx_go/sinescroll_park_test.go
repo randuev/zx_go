@@ -94,32 +94,34 @@ func TestSinescrollParkCadence(t *testing.T) {
 	}
 	var pks []pk
 	insns := uint64(0)
-	// step instruction-wise, catch every park (PC lands at lhalt+1 after the
-	// HALT executes and the IM2 ISR has retired).
+	// Park = PC sits at lhalt+1 (zx_go advances PC past the HALT opcode and
+	// holds the CPU Halted; haltTick only bumps R/tstates — it NEVER asserts
+	// IRQPending, so pure stepping starves the wake: insns=1, p frozen).
+	// Wake with a real ULA frame: runOneFrameHeadless runs 70908 T, vsync
+	// asserts at the tail, ISR fires, loop repaints once (p += spd), parks.
+	// Law: at every stable-level park p advanced by exactly spd since the
+	// last park — one paint per vsync, no skips, no double-steps.
+	wd := 0
 	for len(pks) < 300 {
-		// zx_go advances PC past executed HALT: parked PC == lhalt+1.
-		guard := uint64(70908 * 4)
-		wd := 0
-		for guard > 0 {
-			if emu.cpu.PC == lhalt+1 {
-				wd++
-				if wd >= 2 { // seen it twice: truly parked, not a fly-by
-					break
-				}
-			} else {
+		if emu.cpu.PC == lhalt+1 {
+			wd++
+			if wd >= 2 { // twice in a row: truly parked, not a fly-by
+				p := int(emu.mem.Read(pA)) | int(emu.mem.Read(pA+1))<<8
+				lvl := emu.mem.Read(lvlA)
+				pks = append(pks, pk{n: len(pks), p: p, lvl: lvl, insns: insns,
+					taken: z80.IntFireCount, rej: z80.IntRejectCount})
+				runOneFrameHeadless(emu, roms.ModelPlus2) // wake + one paint
 				wd = 0
+				continue
 			}
-			emu.cpu.StepInstructionWithIRQ()
-			insns++
-			guard--
+		} else {
+			wd = 0
 		}
-		if guard == 0 {
-			t.Fatalf("never parked at lhalt+1=%04X (PC=%04X) — bad build", lhalt+1, emu.cpu.PC)
+		emu.cpu.StepInstructionWithIRQ()
+		insns++
+		if insns > uint64(70908)*400 {
+			t.Fatalf("only %d parks after %d insns (PC=%04X)", len(pks), insns, emu.cpu.PC)
 		}
-		p := int(emu.mem.Read(pA)) | int(emu.mem.Read(pA+1))<<8
-		lvl := emu.mem.Read(lvlA)
-		pks = append(pks, pk{n: len(pks), p: p, lvl: lvl, insns: insns,
-			taken: z80.IntFireCount, rej: z80.IntRejectCount})
 	}
 
 	stuck0, stuck1, trans := 0, 0, 0
