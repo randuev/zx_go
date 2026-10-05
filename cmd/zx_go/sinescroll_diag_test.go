@@ -156,7 +156,7 @@ func TestSinescrollDiag(t *testing.T) {
 	// 1200 bar was calibrated against the ROM-garbage build (zero-filled
 	// CHARPTR8 -> sprite fetch read $0000), which read as dense noise.
 	if lit < 250 || lit > 600 {
-		t.Fatalf("ink %d outside expected h8-once range [250,600]", lit)
+		t.Fatalf("ink %d outside expected readable-text range [700,1600]", lit)
 	}
 	// ASCII dump of band rows for human verification
 	for y := 80; y < 115; y++ {
