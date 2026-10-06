@@ -1,6 +1,9 @@
 package main
 
 import (
+	"strings"
+	"strconv"
+
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
@@ -46,7 +49,21 @@ func TestSinescrollFrames(t *testing.T) {
 	}
 	emu.cpu.SP = 0xFF00
 	emu.cpu.PC = base
-	loop := uint16(0x80FC)
+	loop := uint16(0x8114) // v6.6c default; prefer symbol below
+	if bs, err := os.ReadFile("/root/nerve-workspace/demos/sinescroll/sinescroll.sym"); err == nil {
+		for _, ln := range strings.Split(string(bs), "\n") {
+			name, rest, ok := strings.Cut(strings.TrimSpace(ln), ":")
+			if !ok {
+				continue
+			}
+			rest = strings.TrimSpace(rest)
+			if name == "loop" && strings.HasPrefix(rest, "EQU 0x") {
+				if v, e := strconv.ParseUint(rest[6:], 16, 16); e == nil {
+					loop = uint16(v)
+				}
+			}
+		}
+	}
 
 	frameGrid := func(page int) [][]int {
 		b := emu.mem.RAM8KPage(page)

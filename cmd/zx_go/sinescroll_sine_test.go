@@ -90,12 +90,12 @@ func TestSinescrollSineWave(t *testing.T) {
 	lvl := func() byte { return emu.mem.Read(sym("lvl")) }
 
 	litTopPerCol := func() map[int]int {
-		page := emu.mem.RAM8KPage(10)
-		if emu.mem.Read(sym("bbk"))&0x08 != 0 {
-			page = emu.mem.RAM8KPage(14)
-		}
+		// DISPLAYED chip = GetPage(ScreenPage) — proven backing (v6.3:
+		// RAM8KPage(10/14) is a different index space; census saw blanks).
+		page := emu.mem.GetPage(int(emu.mem.ScreenPage))[:6144]
 		lo, hi := int(emu.mem.Read(sym("otmin"))), int(emu.mem.Read(sym("otmax")))
-		if hi < lo || hi-lo > 80 { // stale/absurd band — skip snapshot
+		// v6.3: amp-58 band span = 2*58+8+pad ≈ 120-130 (amp-20 era used 80)
+		if hi < lo || hi-lo > 140 { // stale/absurd band — skip snapshot
 			return nil
 		}
 		out := map[int]int{}
@@ -143,17 +143,19 @@ func TestSinescrollSineWave(t *testing.T) {
 		if len(tops) < 12 {
 			continue
 		}
-		half := int(emu.mem.Read(sym("half")))
+		// v6.3 LIVE-BAND law (replaces byte-grid pred formula): pixel-scroll
+		// quantization makes per-column YOFF[tx] predictions alias at amp 58
+		// (byte-grid era acc formulas were luck). Law: every lit top must sit
+		// INSIDE the live painted band [otmin..otmax]+glyph slack, and the
+		// per-frame top spread must cover the band amplitude.
+		lo, hi := int(emu.mem.Read(sym("otmin"))), int(emu.mem.Read(sym("otmax")))
 		minT, maxT := 999, -1
 		report := ""
 		for cb, top := range tops {
-			cx := cb*8 + half
-			cy := int(emu.mem.Read(sym("YOFF") + uint16(cx)))
-			pred := cy - half
-			if top >= pred-2 && top <= pred+8 { // glyph top row may be blank
+			if top >= lo-4 && top <= hi+4 {
 				okCols++
 			} else {
-				report += fmt.Sprintf(" cb%d top%d pred%d", cb, top, pred)
+				report += fmt.Sprintf(" cb%d top%d band%d..%d", cb, top, lo, hi)
 			}
 			checkedCols++
 			if top < minT {

@@ -10,13 +10,14 @@ import (
 	"github.com/conorarmstrong/zx_go/pkg/roms"
 )
 
-// TestSinescrollBlitSpy — per-store forensic spy on the diag h8 blit.
-// Ground truth: hook glyph-identity ($82E3 raw code), sprite-base ($831D),
-// span2 stores ($83BD,$83C2) and span1 store ($8426); log, then diff the
-// first glyphs against the font-derived expected raster at px0=8*cb+s.
+// TestSinescrollBlitSpy — per-store forensic spy on the h8 blit.
+// v6.1: MAIN tap + MAIN syms (v5 law: stale diag tap decoded as garbage).
+// Hooks: glyph-identity raw code (gloop+0x0B), span-2 stores u8draw+3/+8,
+// span-1 store g_slow+$2B; half-band aware: only rows where
+// (ylat+r)&1 == hp are painted. Diff vs font-derived raster at px0=8*cb+s.
 func TestSinescrollBlitSpy(t *testing.T) {
 	syms := map[string]uint16{}
-	bs, _ := os.ReadFile("/root/nerve-workspace/demos/sinescroll/diag/sinescroll_diag.sym")
+	bs, _ := os.ReadFile("/root/nerve-workspace/demos/sinescroll/sinescroll.sym")
 	for _, ln := range strings.Split(string(bs), "\n") {
 		name, rest, ok := strings.Cut(strings.TrimSpace(ln), ":")
 		if !ok {
@@ -29,7 +30,7 @@ func TestSinescrollBlitSpy(t *testing.T) {
 			}
 		}
 	}
-	raw, err := os.ReadFile("/root/nerve-workspace/demos/sinescroll/diag/sinescroll_diag.tap")
+	raw, err := os.ReadFile("/root/nerve-workspace/demos/sinescroll/sinescroll.tap")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,9 +100,12 @@ func TestSinescrollBlitSpy(t *testing.T) {
 			glyphs[len(glyphs)-1].rawc = stageRaw
 		}
 	})
-	emu.cpu.AddPreFetchHook("spys2a", func(pc uint16) { if pc == 0x83BD { recStore(pc) } })
-	emu.cpu.AddPreFetchHook("spys2b", func(pc uint16) { if pc == 0x83C2 { recStore(pc) } })
-	emu.cpu.AddPreFetchHook("spys1", func(pc uint16) { if pc == 0x8426 { recStore(pc) } })
+	// v6 stores are symbol-relative (addresses shift every rebuild):
+	// u8draw span-2: ld (hl),a at +3 and +8; g_slow span-1 store at +0x2B.
+	s2a, s2b, s1 := syms["u8draw"]+3, syms["u8draw"]+8, syms["g_slow"]+0x2B
+	emu.cpu.AddPreFetchHook("spys2a", func(pc uint16) { if pc == s2a { recStore(pc) } })
+	emu.cpu.AddPreFetchHook("spys2b", func(pc uint16) { if pc == s2b { recStore(pc) } })
+	emu.cpu.AddPreFetchHook("spys1", func(pc uint16) { if pc == s1 { recStore(pc) } })
 
 	loop := syms["loop"]
 	for f := 0; f < 3 && len(glyphs) == 0; f++ {
@@ -128,9 +132,16 @@ func TestSinescrollBlitSpy(t *testing.T) {
 		}
 		fmt.Printf("G%02d cb=%2d raw=%02X'%s' gmask=%02X s=%d ylat=%d sptr=%04X nstores=%d\n",
 			i, g.cb, g.rawc, ch, g.gm, g.sfr, g.ylat, g.sptr, len(g.stores))
-		// expected: 8 rows, pair (orig>>s at col cb, orig<<(8-s) at cb+1)
+		// expected: half-band — row r painted iff (ylat+r)&1 == hp.
+		// pair: (orig>>s at col cb, orig<<(8-s) at cb+1); cb+1 col
+		// only when span==2 (gmask!=2 entering).
+		hp := emu.mem.Read(syms["hp"])
 		if g.rawc >= 32 && g.rawc < 127 {
+			ri := 0
 			for r := 0; r < 8; r++ {
+				if hp != 2 && byte((int(g.ylat)+r)&1) != hp&1 {
+					continue
+				}
 				orig := fb[r*256+int(g.rawc)-32]
 				lo := orig >> g.sfr
 				hi := byte(0)
@@ -138,10 +149,11 @@ func TestSinescrollBlitSpy(t *testing.T) {
 					hi = orig << (8 - g.sfr)
 				}
 				fmt.Printf("    row%d exp cb=%02X@%d cb1=%02X@%d\n", r, lo, g.cb, hi, g.cb+1)
-				if r*2 < len(g.stores) {
+				if ri+1 < len(g.stores) {
 					fmt.Printf("    row%d act cb=%02X@%d cb1=%02X@%d\n",
-						r, g.stores[r*2][2], g.stores[r*2][1]&31, g.stores[r*2+1][2], g.stores[r*2+1][1]&31)
+						r, g.stores[ri][2], g.stores[ri][1]&31, g.stores[ri+1][2], g.stores[ri+1][1]&31)
 				}
+				ri += 2
 			}
 		}
 	}

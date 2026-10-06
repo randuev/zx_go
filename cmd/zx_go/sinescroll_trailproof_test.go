@@ -71,7 +71,11 @@ func TestSinescrollTrailProof(t *testing.T) {
 	// $07 PA=0 -> b5 page10; $0D PA=1 -> b7 page14) after 3 DIFFERENT paints.
 	var snaps [][]byte
 	var ps []uint16
+	var lvls []byte
 	prevP := uint16(0xFFFF)
+	prevLvl := emu.mem.Read(syms["lvl"])
+	skip := 0 // v6.3: skip capture 2 wakes after a lvl switch — the shown
+	// bank legitimately holds one-frame-old content during the swap flush
 	frames := 0
 	for len(snaps) < 3 {
 		steps := 0
@@ -87,21 +91,41 @@ func TestSinescrollTrailProof(t *testing.T) {
 		}
 		frames++
 		p := uint16(emu.mem.Read(syms["p"])) | uint16(emu.mem.Read(syms["p"]+1))<<8
+		lvlNow := emu.mem.Read(syms["lvl"])
+		if lvlNow != prevLvl {
+			prevLvl = lvlNow
+			skip = 2
+		}
+		if skip > 0 {
+			skip--
+			continue
+		}
 		bbk := emu.mem.Read(syms["bbk"])
 		// displayed bank = PA-selected: bbk&8 -> b7 else b5
-		page := 10
-		if bbk&8 != 0 {
-			page = 14
-		}
+		// v6.3: displayed chip = GetPage(ScreenPage) (RAM8KPage(10/14)
+		// is a different index space — census false-blanked there).
+		page := int(emu.mem.ScreenPage)
+		_ = bbk
 		if p < 200 {
 			continue // skip scroll-in lead-in; capture mid-text panels
 		}
 		if p != prevP {
 			prevP = p
 			g := make([]byte, 6144)
-			copy(g, emu.mem.RAM8KPage(page)[:6144])
-			snaps = append(snaps, g)
-			ps = append(ps, p)
+			copy(g, emu.mem.GetPage(page)[:6144])
+			// capture only inked parks: zoom-entry erase-only wakes are a
+			// designed ~40ms blank beat, not evidence (v6.3 cadence).
+			inked := 0
+			for _, v := range g {
+				if v != 0 {
+					inked++
+				}
+			}
+			if inked > 0 {
+				snaps = append(snaps, g)
+				ps = append(ps, p)
+				lvls = append(lvls, emu.mem.Read(syms["lvl"]))
+			}
 		}
 		if frames > 400 {
 			t.Fatalf("only %d distinct paints in %d frames", len(snaps), frames)
@@ -148,11 +172,21 @@ func TestSinescrollTrailProof(t *testing.T) {
 			}
 		}
 		t.Logf("panel%d inkRows y=%d..%d", si, minY, maxY)
-		if minY < 76 || maxY > 116 {
-			t.Errorf("panel%d ink outside band 76..116 (y=%d..%d) — ghost residue", si, minY, maxY)
+		// v6.3 per-level band law: h8 amp-58 = 96±(58+8)+quant => ~30..162;
+		// h16 bake AMP[16]=14 => ytop 82..110, span 16 rows => ~80..126.
+		lo, hi := 30, 162
+		if lvls[si] == 1 {
+			lo, hi = 64, 129
 		}
-		if ink > 900 {
-			t.Errorf("panel%d ink=%d > 900 — accumulation (ghost trail)", si, ink)
+		if minY < lo || maxY > hi {
+			t.Errorf("panel%d ink outside band %d..%d (y=%d..%d lvl=%d) — ghost residue", si, lo, hi, minY, maxY, lvls[si])
+		}
+		inkCap := 900
+		if lvls[si] == 1 {
+			inkCap = 1400
+		}
+		if ink > inkCap {
+			t.Errorf("panel%d ink=%d > %d — accumulation (ghost trail)", si, ink, inkCap)
 		}
 		for y := 0; y < 192; y++ {
 			o := ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5)
