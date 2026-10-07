@@ -22,6 +22,65 @@ project targets [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   transparently falls back to the same silent mixer. `ZX_GO_AUDIO_DEBUG=1`
   logs pump accounting (`pumps/guard_skips/pushes`) for diagnostics.
 
+## [v1.12.5]
+
+**Sound in sync, border effects drawn along the line (issue #12).**
+
+### Fixed
+
+- **Sound no longer arrives half a second late (issue #12).** The audio
+  library's player keeps its own read-ahead, 0.5 s by default, and nothing
+  ever set it. The emulator always has samples ready, so that read-ahead
+  stayed full. In Batty the ball's hit sounded well after the ball struck.
+  The player's buffer is now capped at one 1024-sample pull. Measured in the
+  running GUI, its share of the delay fell from about 515 ms to about 42 ms.
+- **I/O to a ULA port no longer runs 4 T-states long.** The ULA port's
+  contention added the I/O cycle's own 4 T-states and the instruction then
+  added them again, so every `OUT ($FE)` and `IN ($FE)` on the 48K and 128K
+  family was 4 T-states slow (15 instead of 11 for `OUT (n),A`), slowing every
+  beeper routine. Contention was also checked at the start of the instruction
+  rather than in its I/O cycle. Ports are now contended in Fuse's early and
+  late halves, and the port sees a write 1 T-state into the cycle and a read
+  3 T-states in.
+- **The Next's raster line (NextReg $1E/$1F) now runs at the video clock at
+  every CPU speed.** It counted CPU T-states, so at 28 MHz it ran eight times
+  too fast. TX-1696 polls it and gave control back to NextZXOS once reads were
+  sampled at the right point in the cycle.
+- **Border changes now land where the beam was, not on the whole line.** The
+  border was painted one colour per scanline, the last one written on it. A
+  beeper routine flips the border with every speaker pulse, several times a
+  line, so the "We Are Vocoders" demo showed a solid border where real
+  hardware shows moving stripes. Each change is now painted from its beam
+  position (Fuse's mapping), in 8-pixel steps on the Sinclair ULAs and 2-pixel
+  steps on the Pentagon, which reloads the border colour every pixel
+  (zxula.vhd).
+
+## [v1.12.4]
+
+**Audio no longer stutters, lags or tears (issue #12).**
+
+### Fixed
+
+- **About a third of all audio frames were thrown away.** Each frame's audio is
+  pushed when the frame renders, and the frame loop only rendered when the
+  wall clock said a full period had passed since the last render. The pacer
+  already runs one frame per period, so timer jitter put about half the ticks
+  a hair under that and they skipped the render. A 40-second run on a 48K
+  rendered 1146 of 1751 frames. The audio frames lost with them are the
+  stutter, and the picture ran at about 33 fps. The loop now renders every
+  frame it runs.
+- **The audio ring now plays frames out at the rate they really arrive.** Each
+  emulated frame pushes 882 samples, a flat 44100/50, but the frame loop paces
+  to the model's real period: 50.08 Hz on a 48K, 50.02 Hz on the 128K family
+  and the Next, 48.83 Hz on a Pentagon. Nothing reconciled the two, so a 48K
+  handed the card about 70 samples a second more than it played and a
+  Pentagon about 1000 fewer. A surplus fills the ring, grows latency to its
+  whole 240 ms and then overflows in bursts. A deficit starves it. The reader
+  now resamples each frame over the period actually paced, interpolating
+  between samples, and trims that rate by up to 0.5% from the smoothed fill.
+  Latency holds near 80 ms on every model, against the host timer drifting
+  from the sound card's clock as well.
+
 ## [v1.12.3]
 
 **Backlog work, and two corrections to v1.12.2's own changes.**
