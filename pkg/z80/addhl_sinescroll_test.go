@@ -9,6 +9,7 @@ func TestAddHLDE_SinescrollRepro(t *testing.T) {
 	cpu, mem := createTestCPU()
 	cpu.PC = 0x81C8
 	cpu.A = 0x20
+	cpu.D = 0x00 // harness powers on DE=$FFFF; sinescroll's live DE was a clean 16-bit offset
 	prog := []byte{0x21, 0x80, 0x9A, 0x5F, 0x19, 0x7E}
 	for i, b := range prog {
 		mem.Write(uint16(0x81C8+i), b)
