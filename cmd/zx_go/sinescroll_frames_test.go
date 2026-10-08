@@ -1,9 +1,6 @@
 package main
 
 import (
-	"strings"
-	"strconv"
-
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
@@ -11,59 +8,17 @@ import (
 	"hash/crc32"
 	"os"
 	"testing"
-
-	"github.com/conorarmstrong/zx_go/pkg/roms"
 )
 
 // TestSinescrollFrames — captures consecutive DISPLAYED-bank snapshots of
 // the v4.1 scroller to answer: is the screen actually cleared between frames?
 func TestSinescrollFrames(t *testing.T) {
-	raw, err := os.ReadFile("/root/nerve-workspace/demos/sinescroll/sinescroll.tap")
-	if err != nil {
-		t.Fatal(err)
-	}
-	blocks := parseTap(raw)
-	var base uint16
-	var code []byte
-	for _, b := range blocks {
-		if d, ok := b[1].([]byte); ok && len(d) > 13000 {
-			base = b[0].(uint16)
-			code = d
-		}
-	}
-	prev := cliFlagsActive
-	nf := cliFlags{}
-	nf.noSound = true
-	cliFlagsActive = &nf
-	defer func() { cliFlagsActive = prev }()
-	emu, err := newEmulator(roms.ModelPlus2)
-	if err != nil {
-		t.Fatal(err)
-	}
-	emu.paused.Store(false)
-	for i := 0; i < 220; i++ {
-		runOneFrameHeadless(emu, roms.ModelPlus2)
-	}
-	for i, v := range code {
-		emu.mem.Write(base+uint16(i), v)
-	}
-	emu.cpu.SP = 0xFF00
-	emu.cpu.PC = base
-	loop := uint16(0x8114) // v6.6c default; prefer symbol below
-	if bs, err := os.ReadFile("/root/nerve-workspace/demos/sinescroll/sinescroll.sym"); err == nil {
-		for _, ln := range strings.Split(string(bs), "\n") {
-			name, rest, ok := strings.Cut(strings.TrimSpace(ln), ":")
-			if !ok {
-				continue
-			}
-			rest = strings.TrimSpace(rest)
-			if name == "loop" && strings.HasPrefix(rest, "EQU 0x") {
-				if v, e := strconv.ParseUint(rest[6:], 16, 16); e == nil {
-					loop = uint16(v)
-				}
-			}
-		}
-	}
+	// v6.6c FIX: use the established boot helper. The previous manual poke
+	// left the machine in a ROM-driven state (no IFF/IM reset, unverified
+	// paging) so PC never reached the demo loop -> "runaway" at frame 1.
+	syms := loadSinescrollSyms(t)
+	emu := bootSinescroll(t, syms, "/root/nerve-workspace/demos/sinescroll/sinescroll.tap")
+	loop := syms["loop"]
 
 	frameGrid := func(page int) [][]int {
 		b := emu.mem.RAM8KPage(page)
