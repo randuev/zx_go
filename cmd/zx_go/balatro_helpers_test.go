@@ -124,7 +124,7 @@ func balBCD3(emu *emulator, a uint16) int {
 // balTextLit counts non-zero glyph bytes in one text char row (row 0..23).
 func balTextLit(emu *emulator, row int) int {
 	lit := 0
-	base := uint16(0x4000 + (row>>3)<<10 + (row&7)<<5)
+	base := uint16(0x4000 + (row>>3)*0x800 + (row&7)*0x20)   // third stride $800, pixel-row $100 within third => char row
 	for x := 0; x < 32; x++ {
 		if emu.mem.Read(base+uint16(x)) != 0 {
 			lit++

@@ -33,6 +33,17 @@ func TestBalatroProof(t *testing.T) {
 	}
 	balRunFrames(emu, 6)
 	save("01-title.png")
+	// dump first 3 sheets (ci 0,1,2) rows to verify sheet order
+	for ci2 := range 3 {
+		lo := balPeek(emu, syms["FONT6CI"]+uint16(ci2)*2)
+		hi := balPeek(emu, syms["FONT6CI"]+uint16(ci2)*2+1)
+		base := uint16(hi)*256 + uint16(lo)
+		line := ""
+		for i := 0; i < 14; i += 2 {
+			line += fmt.Sprintf("%02X ", balPeek(emu, base+uint16(i)))
+		}
+		t.Logf("dumpSheets ci%d: %s", ci2, line)
+	}
 	// start the round and WAIT for the deal to finish, then force four aces
 	pressOnce(t, emu, syms, "SPACE")
 	for i := 0; i < 60 && balPeek(emu, syms["MODE"]) != bMODE_PLAY; i++ {
@@ -43,8 +54,15 @@ func TestBalatroProof(t *testing.T) {
 		emu.mem.Write(syms["HAND"]+uint16(i), byte(i*16+12))
 	}
 	emu.mem.Write(syms["HAND"]+4, byte(2*16+2))
-	for i := 0; i < 5; i++ {
-		balPeek(emu, syms["CURSOR"])
+	// poke redraw: call drawHand directly (same trick as callShuffle)
+	// return into the live loop: push current PC, jump to drawHand, run till it rets
+	curPC := emu.cpu.PC
+	emu.cpu.SP -= 2
+	emu.mem.Write(emu.cpu.SP, byte(curPC&0xFF))
+	emu.mem.Write(emu.cpu.SP+1, byte(curPC>>8))
+	emu.cpu.PC = syms["drawHand"]
+	for i := 0; i < 200000 && emu.cpu.PC != curPC; i++ {
+		emu.cpu.StepInstruction()
 	}
 	save("02-hand.png")
 	// select from the LEFT edge: cursor starts at slot0 after a fresh deal

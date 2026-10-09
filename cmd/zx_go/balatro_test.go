@@ -19,11 +19,11 @@ const (
 func startGame(t *testing.T, syms map[string]uint16) (*emulator, uint16) {
 	t.Helper()
 	emu := bootBalatro(t, syms)
-	balRunFrames(emu, 6)
+	balRunFrames(emu, 8)
 	if m := balPeek(emu, syms["MODE"]); m != bMODE_TITLE {
 		t.Fatalf("MODE=%d at boot, want TITLE(0)", m)
 	}
-	if lit := balTextLit(emu, 0) + balTextLit(emu, 1) + balTextLit(emu, 7); lit < 25 {
+	if lit := balTextLit(emu, 2) + balTextLit(emu, 4) + balTextLit(emu, 23); lit < 25 {
 		t.Fatalf("title text sparse: lit=%d", lit)
 	}
 	pressOnce(t, emu, syms, "SPACE")
@@ -44,12 +44,12 @@ func TestBalatroBootTitle(t *testing.T) {
 	if emu.cpu.IFF1 {
 		t.Fatalf("IFF1 on — poll architecture must keep INTs off")
 	}
-	for _, r := range []int{0, 1, 7} {
+	for _, r := range []int{2, 4, 23} {
 		if balTextLit(emu, r) == 0 {
 			t.Fatalf("title row %d empty", r)
 		}
 	}
-	for _, r := range []int{2, 3, 4, 5, 6} {
+	for _, r := range []int{0, 1, 3, 5, 6} {
 		if balTextLit(emu, r) != 0 {
 			t.Fatalf("title row %d should be blank, lit=%d", r, balTextLit(emu, r))
 		}
