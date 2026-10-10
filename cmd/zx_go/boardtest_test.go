@@ -60,7 +60,8 @@ func TestBoardTest(t *testing.T) {
 	emu.cpu.SP = 0xBF00
 	emu.cpu.PC = 0x8000
 	// code+data page snapshot : any self-modification is a bug
-	codeSnap := make([]byte, 0x800)
+	// span = up to DSB (symbol-driven ; layout shifts with code growth)
+	codeSnap := make([]byte, S["DSB"]-0x8000)
 	for a := range codeSnap {
 		codeSnap[a] = balPeek(emu, uint16(0x8000+a))
 	}
