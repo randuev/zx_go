@@ -65,6 +65,40 @@ func TestBalatroProof(t *testing.T) {
 		emu.cpu.StepInstruction()
 	}
 	save("02-hand.png")
+	// census: ink map + paper per cell
+	{
+		var ink [192][256]bool
+		for y := 0; y < 192; y++ {
+			for x := 0; x < 256; x++ {
+				a := uint16(0x4000 + ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + (x >> 3))
+				b := balPeek(emu, a)
+				ink[y][x] = (b>>(7-(x&7)))&1 == 1
+			}
+		}
+		for r := 0; r < 24; r++ {
+			line := ""
+			arow := ""
+			for c := 0; c < 32; c++ {
+				any := false
+				for py := 0; py < 8 && !any; py++ {
+					for px := 0; px < 8; px++ {
+						if ink[r*8+py][c*8+px] {
+							any = true
+							break
+						}
+					}
+				}
+				if any {
+					line += "#"
+				} else {
+					line += "."
+				}
+				ar := balPeek(emu, uint16(0x5800+r*32+c))
+				arow += string("KBRMGCYW"[(ar>>3)&7])
+			}
+			fmt.Printf("CENS r%02d %s attr:%s\n", r, line, arow)
+		}
+	}
 	// select from the LEFT edge: cursor starts at slot0 after a fresh deal
 	pressOnce(t, emu, syms, "ENTER")
 	balRunFrames(emu, 2)
