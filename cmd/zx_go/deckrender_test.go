@@ -179,5 +179,31 @@ func TestDeckRender(t *testing.T) {
 	if seen != 52 {
 		t.Fatalf("deck gate drew %d cards , want 52", seen)
 	}
+	// selected-heart pass : SEL raises card + flips plate to yellow paper ;
+	// Seva law : suit ink MUST STAY RED on selected hearts/diamonds
+	poke("CDX", 0x10) // heart A
+	poke("CBX", 14)
+	poke("BAND", 7)
+	poke("WC", 0x03)
+	poke("SEL", 0x80)
+	emu.mem.Write(S["VALPTR"], 0x00)
+	emu.mem.Write(S["VALPTR"]+1, 0x00)
+	emu.mem.Write(S["PYOFF"], 0x00)
+	emu.mem.Write(0xBF00, byte(scratch&0xFF))
+	emu.mem.Write(0xBF01, byte(scratch>>8))
+	emu.cpu.SP = 0xBF00
+	emu.cpu.PC = cellPC
+	for i := 0; i < 200000; i++ {
+		if emu.cpu.PC == scratch {
+			break
+		}
+		emu.cpu.StepInstruction()
+	}
+	for b := 2; b <= 3; b++ {
+		a := balPeek(emu, 0x5800+uint16(6+b)*32+15) // raised : WD=BAND-1 ; col CBX+1
+		if a != 0x3A {
+			t.Errorf("selected heart attr b%d : got $%02X want $3A (RED ink on yellow paper — selected suit MUST stay red)", b, a)
+		}
+	}
 	fmt.Printf("DECK: 52/52 cards rendered across thirds , ink law holds\n")
 }
