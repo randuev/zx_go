@@ -201,8 +201,8 @@ func TestDeckRender(t *testing.T) {
 	}
 	for b := 2; b <= 3; b++ {
 		a := balPeek(emu, 0x5800+uint16(6+b)*32+15) // raised : WD=BAND-1 ; col CBX+1
-		if a != 0x3A {
-			t.Errorf("selected heart attr b%d : got $%02X want $3A (RED ink on yellow paper — selected suit MUST stay red)", b, a)
+		if a != 0x6A {
+			t.Errorf("selected heart attr b%d : got $%02X want $6A (RED ink on bright YELLOW paper — selected suit MUST stay red)", b, a)
 		}
 	}
 	fmt.Printf("DECK: 52/52 cards rendered across thirds , ink law holds\n")

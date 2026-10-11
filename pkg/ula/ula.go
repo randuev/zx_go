@@ -982,8 +982,8 @@ func (u *ULA) render() *image.RGBA {
 			attr := attrMem[attrAddr]
 
 			inkIdx := attr & 0x07
-			paperIdx := (attr >> 3) & 0x07
-			if (attr & 0x40) != 0 { // Bright
+			paperIdx := (attr >> 4) & 0x07
+			if (attr & 0x08) != 0 { // Bright
 				inkIdx += 8
 				paperIdx += 8
 			}

@@ -1,3 +1,3172 @@
-error: opening file: boardtest.zasm
-error: opening file: boardtest.zasm
-error: opening file: boardtest.zasm
+boardtest.zasm(1212): warning[opkeyword]: Label collides with one of the operator keywords, try capitalizing it or other name: SHL
+# file opened: boardtest.zasm
+   1  0000                  DEVICE ZXSPECTRUM128
+   2  0000                  org $8000
+   3  8000              ; =====================================================================
+   4  8000              ; BOARDTEST v4 - full static board, ROM 48K font (classic 8x8 cells at
+   5  8000              ; $3D00, paged in while bit7=0). Byte-aligned cell grid. STANDALONE :
+   6  8000              ; proves readable text + layout + suit colours + tight non-overlapping
+   7  8000              ; cards before the engine inherits them. Args via globals. Keeps pairs.
+   8  8000              ; =====================================================================
+   9  8000              start:
+  10  8000 F3               di
+  11  8001 31 00 BF         ld sp,$BF00                 ; stack grows DOWN from $BF00 (all RAM free here)
+  12  8004 01 FD 7F         ld bc,$7FFD
+  13  8007 21 0E 89         ld hl,PAGEV
+  14  800A ED A3            outi                        ; page $07 : ROM paged in, display=b5
+  15  800C                  ; full wash : bitmap black + attrs green base (kills boot RAM-test residue)
+  16  800C 21 00 40         ld hl,$4000
+  17  800F 11 01 40         ld de,$4001
+  18  8012 01 FF 17         ld bc,$17FF
+  19  8015 36 00            ld (hl),$00
+  20  8017 ED B0            ldir
+  21  8019 21 00 58         ld hl,$5800
+  22  801C 11 01 58         ld de,$5801
+  23  801F 01 FF 02         ld bc,$02FF
+  24  8022 36 27            ld (hl),$27
+  25  8024 ED B0            ldir
+  26  8026 CD 62 84         call renderBoard
+  27  8029              halt1:
+  28  8029 76               halt
+  29  802A 18 FD            jr halt1
+  30  802C
+  31  802C              ; ---- core : pixel-row address ----------------------------------------
+  32  802C              ; pxHL : (Y),(BX) -> HL=screen byte ; keeps AF,BC,DE,HL? HL out only
+  33  802C              pxHL:
+  34  802C F5               push af
+  35  802D D5               push de
+  36  802E 3A EC 88         ld a,(Y)
+  37  8031 5F               ld e,a
+  38  8032 E6 07            and $07
+  39  8034 57               ld d,a                    ; D=pixel row
+  40  8035 3A EC 88         ld a,(Y)
+  41  8038 CB 3F            srl a
+  42  803A CB 3F            srl a
+  43  803C CB 3F            srl a                     ; band
+  44  803E 87               add a,a
+  45  803F 87               add a,a
+  46  8040 87               add a,a                   ; band*8
+  47  8041 82               add a,d                 ; index = row
+  48  8042 6F               ld l,a                  ; v5.1 LAW : *2 MUST be 16-bit (row>=128 -> 256 wraps A to $00
+  49  8043 26 00            ld h,$00                ;   = ROWTAB[0] = third 0 : suit rows rained onto top of screen)
+  50  8045 29               add hl,hl               ;   DW stride *2 in HL pair
+  51  8046 11 77 8A         ld de,ROWTAB
+  52  8049 19               add hl,de
+  53  804A 7E               ld a,(hl)
+  54  804B 23               inc hl
+  55  804C 66               ld h,(hl)
+  56  804D 6F               ld l,a
+  57  804E 3A EF 88         ld a,(BX)
+  58  8051 5F               ld e,a
+  59  8052 16 00            ld d,$00
+  60  8054 19               add hl,de
+  61  8055 D1               pop de
+  62  8056 F1               pop af
+  63  8057 C9               ret
+  64  8058
+  65  8058              ; fillRun : HL=dest,C=count,A=val ; clobbers HL,C ; keeps AF,DE
+  66  8058              fillRun:
+  67  8058 77               ld (hl),a
+  68  8059 23               inc hl
+  69  805A 0D               dec c
+  70  805B 20 FB            jr nz,fillRun
+  71  805D C9               ret
+  72  805E
+  73  805E              ; ---- attributes : rect (RR,CC,NR,NC,ATT) ; keeps all ------------
+  74  805E              rectAtt:
+  75  805E F5               push af
+  76  805F C5               push bc
+  77  8060 D5               push de
+  78  8061 E5               push hl
+  79  8062 3A F9 88         ld a,(RR)
+  80  8065 6F               ld l,a
+  81  8066 26 00            ld h,$00
+  82  8068 29               add hl,hl
+  83  8069 29               add hl,hl
+  84  806A 29               add hl,hl
+  85  806B 29               add hl,hl
+  86  806C 29               add hl,hl                 ; row*32  (5 doubles)
+  87  806D 01 00 58         ld bc,$5800
+  88  8070 09               add hl,bc
+  89  8071 3A FA 88         ld a,(CC)
+  90  8074 85               add a,l
+  91  8075 6F               ld l,a
+  92  8076 3A FB 88         ld a,(NR)
+  93  8079 32 FE 88         ld (RCNT),a
+  94  807C              raRow:
+  95  807C E5               push hl
+  96  807D 3A FC 88         ld a,(NC)
+  97  8080 4F               ld c,a
+  98  8081 3A FD 88         ld a,(ATT)
+  99  8084 CD 58 80         call fillRun
+ 100  8087 E1               pop hl
+ 101  8088 11 20 00         ld de,32
+ 102  808B 19               add hl,de
+ 103  808C 3A FE 88         ld a,(RCNT)
+ 104  808F 3D               dec a
+ 105  8090 32 FE 88         ld (RCNT),a
+ 106  8093 20 E7            jr nz,raRow
+ 107  8095 E1               pop hl
+ 108  8096 D1               pop de
+ 109  8097 C1               pop bc
+ 110  8098 F1               pop af
+ 111  8099 C9               ret
+ 112  809A
+ 113  809A              ; ---- pixels : rectPix (Y0)-(YY),(BX),(W),(VAL) ; keeps all -----
+ 114  809A              rectPix:                          ; paint rows Y..YY , W bytes at BX , pattern VAL
+ 115  809A F5               push af
+ 116  809B C5               push bc
+ 117  809C D5               push de
+ 118  809D E5               push hl
+ 119  809E              rpLoop:
+ 120  809E F5               push af
+ 121  809F 3A F0 88         ld a,(W)
+ 122  80A2 4F               ld c,a
+ 123  80A3 3A F1 88         ld a,(VAL)
+ 124  80A6 CD 2C 80         call pxHL
+ 125  80A9 CD 58 80         call fillRun
+ 126  80AC 3A EC 88         ld a,(Y)
+ 127  80AF 21 EE 88         ld hl,YY
+ 128  80B2 BE               cp (hl)
+ 129  80B3 28 07            jr z,rpDone            ; painted last row -> exit (compare BEFORE inc)
+ 130  80B5 3C               inc a
+ 131  80B6 32 EC 88         ld (Y),a
+ 132  80B9 F1               pop af
+ 133  80BA 18 E2            jr rpLoop
+ 134  80BC              rpDone:
+ 135  80BC F1               pop af                 ; loop scratch push
+ 136  80BD E1               pop hl
+ 137  80BE D1               pop de
+ 138  80BF C1               pop bc
+ 139  80C0 F1               pop af
+ 140  80C1 C9               ret
+ 141  80C2
+ 142  80C2              ; ---- ROM font 8x8 --------------------------------------------------
+ 143  80C2              ; putc8 : A=ascii,B=band,C=byteX ; blit glyph OR ; keeps AF
+ 144  80C2              ; ---- 6px TEXT : PROVEN unit kernel (fonttest) + byteX adapters ----
+ 145  80C2              putc8:                          ; A=ascii,B=band,C=byteX
+ 146  80C2 F5               push af
+ 147  80C3 C5               push bc
+ 148  80C4 D5               push de
+ 149  80C5 E5               push hl
+ 150  80C6 79               ld a,c
+ 151  80C7 87               add a,a
+ 152  80C8 87               add a,a
+ 153  80C9 87               add a,a                   ; pixelX = byteX*8
+ 154  80CA 4F               ld c,a
+ 155  80CB CD E4 80         call putc6
+ 156  80CE E1               pop hl
+ 157  80CF D1               pop de
+ 158  80D0 C1               pop bc
+ 159  80D1 F1               pop af
+ 160  80D2 C9               ret
+ 161  80D3
+ 162  80D3              ; drawstr8 : B=band,C=byteX,HL=text
+ 163  80D3              drawstr8:
+ 164  80D3 F5               push af
+ 165  80D4 C5               push bc
+ 166  80D5 D5               push de
+ 167  80D6 E5               push hl
+ 168  80D7 79               ld a,c
+ 169  80D8 87               add a,a
+ 170  80D9 87               add a,a
+ 171  80DA 87               add a,a
+ 172  80DB 4F               ld c,a
+ 173  80DC CD 72 81         call drawstr6
+ 174  80DF E1               pop hl
+ 175  80E0 D1               pop de
+ 176  80E1 C1               pop bc
+ 177  80E2 F1               pop af
+ 178  80E3 C9               ret
+ 179  80E4
+ 180  80E4              ; =====================================================================
+ 181  80E4              putc6:                          ; A=ascii,B=band,C=Xpix ; keeps AF ; clob BC,DE,HL,IY
+ 182  80E4 F5               push af
+ 183  80E5 C5               push bc
+ 184  80E6 FE 80            cp $80
+ 185  80E8 D2 6F 81         jp nc,p6done
+ 186  80EB FE D7            cp $D7
+ 187  80ED 20 06            jr nz,p6asc
+ 188  80EF 2A 93 A4         ld hl,(FONT6X)
+ 189  80F2 C3 16 81         jp p6ph
+ 190  80F5              p6asc:
+ 191  80F5 D6 20            sub $20
+ 192  80F7 FE 60            cp $60
+ 193  80F9 D2 6F 81         jp nc,p6done
+ 194  80FC 5F               ld e,a
+ 195  80FD 16 00            ld d,$00
+ 196  80FF 21 97 A3         ld hl,FONT6IDX
+ 197  8102 19               add hl,de
+ 198  8103 7E               ld a,(hl)
+ 199  8104 FE FF            cp $FF
+ 200  8106 CA 6F 81         jp z,p6done
+ 201  8109 CB 27            sla a
+ 202  810B 6F               ld l,a
+ 203  810C 26 00            ld h,$00
+ 204  810E 11 F7 A3         ld de,FONT6CI
+ 205  8111 19               add hl,de
+ 206  8112 7E               ld a,(hl)
+ 207  8113 23               inc hl
+ 208  8114 66               ld h,(hl)
+ 209  8115 6F               ld l,a
+ 210  8116              p6ph:
+ 211  8116 E5               push hl
+ 212  8117 79               ld a,c
+ 213  8118 E6 07            and $07
+ 214  811A 5F               ld e,a
+ 215  811B 16 00            ld d,$00
+ 216  811D 21 E4 88         ld hl,PHASE14
+ 217  8120 19               add hl,de
+ 218  8121 5E               ld e,(hl)
+ 219  8122 16 00            ld d,$00
+ 220  8124 E1               pop hl
+ 221  8125 19               add hl,de
+ 222  8126 22 E0 88         ld (PSH),hl
+ 223  8129 FD 2A E0 88      ld iy,(PSH)
+ 224  812D 79               ld a,c
+ 225  812E CB 3F            srl a
+ 226  8130 CB 3F            srl a
+ 227  8132 CB 3F            srl a
+ 228  8134 E6 1F            and $1F
+ 229  8136 32 EF 88         ld (BX),a
+ 230  8139 78               ld a,b
+ 231  813A CB 27            sla a
+ 232  813C CB 27            sla a
+ 233  813E CB 27            sla a
+ 234  8140 5F               ld e,a
+ 235  8141 3A 06 89         ld a,(PYOFF)              ; v5 : pixel-row origin within band (default 0)
+ 236  8144 83               add a,e
+ 237  8145 32 EC 88         ld (Y),a
+ 238  8148 06 07            ld b,$07
+ 239  814A              p6L:
+ 240  814A CD 2C 80         call pxHL                 ; v5 LAW : per-row re-anchor (NO inc-h walk :
+ 241  814D FD 7E 00         ld a,(iy)               ; crosses char-row at py=7 (-$6E0) and thirds)
+ 242  8150 B6               or (hl)
+ 243  8151 77               ld (hl),a
+ 244  8152 FD 23            inc iy
+ 245  8154 3A EF 88         ld a,(BX)
+ 246  8157 FE 1F            cp $1F
+ 247  8159 28 06            jr z,p6nhi
+ 248  815B 23               inc hl
+ 249  815C FD 7E 00         ld a,(iy)
+ 250  815F B6               or (hl)
+ 251  8160 77               ld (hl),a
+ 252  8161              p6nhi:
+ 253  8161 FD 23            inc iy
+ 254  8163 3A EC 88         ld a,(Y)
+ 255  8166 3C               inc a
+ 256  8167 32 EC 88         ld (Y),a
+ 257  816A 10 DE            djnz p6L
+ 258  816C C3 6F 81         jp p6done
+ 259  816F              p6done:
+ 260  816F C1               pop bc
+ 261  8170 F1               pop af
+ 262  8171 C9               ret
+ 263  8172
+ 264  8172              ; =====================================================================
+ 265  8172              drawstr6:                       ; B=band,C=Xpix,HL=text ; keeps AF
+ 266  8172 F5               push af
+ 267  8173 C5               push bc
+ 268  8174 D5               push de
+ 269  8175 E5               push hl
+ 270  8176 78               ld a,b
+ 271  8177 32 DC 88         ld (DSB),a
+ 272  817A 79               ld a,c
+ 273  817B 32 DD 88         ld (DSX),a
+ 274  817E 22 DE 88         ld (DSHL),hl
+ 275  8181              dsL:
+ 276  8181 2A DE 88         ld hl,(DSHL)
+ 277  8184 7E               ld a,(hl)
+ 278  8185 B7               or a
+ 279  8186 28 1B            jr z,dsE
+ 280  8188 23               inc hl
+ 281  8189 22 DE 88         ld (DSHL),hl
+ 282  818C 5F               ld e,a
+ 283  818D 3A DC 88         ld a,(DSB)
+ 284  8190 47               ld b,a
+ 285  8191 3A DD 88         ld a,(DSX)
+ 286  8194 4F               ld c,a
+ 287  8195 7B               ld a,e
+ 288  8196 CD E4 80         call putc6
+ 289  8199 3A DD 88         ld a,(DSX)
+ 290  819C C6 06            add a,6                 ; TRUE 6px PITCH
+ 291  819E 32 DD 88         ld (DSX),a
+ 292  81A1 18 DE            jr dsL
+ 293  81A3              dsE:
+ 294  81A3 E1               pop hl
+ 295  81A4 D1               pop de
+ 296  81A5 C1               pop bc
+ 297  81A6 F1               pop af
+ 298  81A7 C9               ret
+ 299  81A8
+ 300  81A8              blit8:
+ 301  81A8 F5               push af
+ 302  81A9 C5               push bc
+ 303  81AA D5               push de
+ 304  81AB E5               push hl
+ 305  81AC 3A F2 88         ld a,(SPR)
+ 306  81AF 5F               ld e,a
+ 307  81B0 3A F3 88         ld a,(SPR+1)
+ 308  81B3 57               ld d,a
+ 309  81B4 CD 2C 80         call pxHL
+ 310  81B7 06 08            ld b,8
+ 311  81B9              bl8:
+ 312  81B9 1A               ld a,(de)
+ 313  81BA B6               or (hl)
+ 314  81BB 77               ld (hl),a
+ 315  81BC 13               inc de
+ 316  81BD 24               inc h
+ 317  81BE 10 F9            djnz bl8
+ 318  81C0 E1               pop hl
+ 319  81C1 D1               pop de
+ 320  81C2 C1               pop bc
+ 321  81C3 F1               pop af
+ 322  81C4 C9               ret
+ 323  81C5
+ 324  81C5              blit16:                         ; 16-row suit blit ; BUGCLASS FIX (v4.2) :
+ 325  81C5 F5               push af
+ 326  81C6 C5               push bc
+ 327  81C7 D5               push de
+ 328  81C8 E5               push hl
+ 329  81C9 3A F2 88         ld a,(SPR)
+ 330  81CC 5F               ld e,a
+ 331  81CD 3A F3 88         ld a,(SPR+1)
+ 332  81D0 57               ld d,a
+ 333  81D1 06 10            ld b,16
+ 334  81D3              bl16:
+ 335  81D3 CD 2C 80         call pxHL                   ; re-anchor EVERY row : inc-h walk crosses
+ 336  81D6 1A               ld a,(de)                 ; char-row boundary at py=7 -> -$6E0 jump ,
+ 337  81D7 B6               or (hl)                   ; plain inc h painted rows 98-103 then rained
+ 338  81D8 77               ld (hl),a                 ; sprite trash into $50xx (the y88-95 ghosts)
+ 339  81D9 13               inc de
+ 340  81DA 3A EC 88         ld a,(Y)
+ 341  81DD 3C               inc a
+ 342  81DE 32 EC 88         ld (Y),a
+ 343  81E1 10 F0            djnz bl16
+ 344  81E3 3A EC 88         ld a,(Y)
+ 345  81E6 D6 10            sub 16
+ 346  81E8 32 EC 88         ld (Y),a                  ; restore Y for callers
+ 347  81EB E1               pop hl
+ 348  81EC D1               pop de
+ 349  81ED C1               pop bc
+ 350  81EE F1               pop af
+ 351  81EF C9               ret
+ 352  81F0
+ 353  81F0              ; ---- box : yellow-ink frame 24x16 at band RR, col CC ------------
+ 354  81F0              ; keeps all
+ 355  81F0              ; ---- pbox : 1px pixel frame ------------------------------------------
+ 356  81F0              ; (RR)=first band , (PBH)=band height-1 , (CC)=first byte col , (NB)=byte width
+ 357  81F0              ; frame $FF (ink-coloured by attr) ; corners+edges only ; keeps AF
+ 358  81F0              pbox:
+ 359  81F0 F5               push af
+ 360  81F1 C5               push bc
+ 361  81F2 D5               push de
+ 362  81F3 E5               push hl
+ 363  81F4 3A F9 88         ld a,(RR)
+ 364  81F7 CB 27            sla a
+ 365  81F9 CB 27            sla a
+ 366  81FB CB 27            sla a
+ 367  81FD 32 EC 88         ld (Y),a
+ 368  8200 32 EE 88         ld (YY),a                 ; top line
+ 369  8203 3A 04 89         ld a,(NB)
+ 370  8206 32 F0 88         ld (W),a
+ 371  8209 3A FA 88         ld a,(CC)
+ 372  820C 32 EF 88         ld (BX),a
+ 373  820F 3E FF            ld a,$FF
+ 374  8211 32 F1 88         ld (VAL),a
+ 375  8214 CD 9A 80         call rectPix
+ 376  8217 3A F9 88         ld a,(RR)
+ 377  821A 6F               ld l,a
+ 378  821B 3A 05 89         ld a,(PBH)
+ 379  821E 85               add a,l
+ 380  821F CB 27            sla a
+ 381  8221 CB 27            sla a
+ 382  8223 CB 27            sla a
+ 383  8225 C6 07            add a,7
+ 384  8227 32 EC 88         ld (Y),a
+ 385  822A 32 EE 88         ld (YY),a                 ; bottom line
+ 386  822D 3A 04 89         ld a,(NB)
+ 387  8230 32 F0 88         ld (W),a
+ 388  8233 CD 9A 80         call rectPix
+ 389  8236                  ; sides : rows RR*8+1 .. RR*8+PBH*8+6
+ 390  8236 3A F9 88         ld a,(RR)
+ 391  8239 CB 27            sla a
+ 392  823B CB 27            sla a
+ 393  823D CB 27            sla a
+ 394  823F 3C               inc a
+ 395  8240 32 EC 88         ld (Y),a
+ 396  8243 3A 05 89         ld a,(PBH)
+ 397  8246 CB 27            sla a
+ 398  8248 CB 27            sla a
+ 399  824A CB 27            sla a
+ 400  824C C6 06            add a,6
+ 401  824E 47               ld b,a
+ 402  824F              pbS:
+ 403  824F C5               push bc
+ 404  8250 3A EC 88         ld a,(Y)
+ 405  8253 32 EE 88         ld (YY),a                 ; single-row anchor law
+ 406  8256 3A FA 88         ld a,(CC)
+ 407  8259 32 EF 88         ld (BX),a
+ 408  825C 3E 80            ld a,$80
+ 409  825E 32 F1 88         ld (VAL),a
+ 410  8261 3E 01            ld a,1
+ 411  8263 32 F0 88         ld (W),a
+ 412  8266 CD 9A 80         call rectPix
+ 413  8269 3A 04 89         ld a,(NB)
+ 414  826C 5F               ld e,a
+ 415  826D 3A FA 88         ld a,(CC)
+ 416  8270 83               add a,e
+ 417  8271 3D               dec a
+ 418  8272 32 EF 88         ld (BX),a
+ 419  8275 3E 01            ld a,$01
+ 420  8277 32 F1 88         ld (VAL),a
+ 421  827A CD 9A 80         call rectPix
+ 422  827D 3A EC 88         ld a,(Y)
+ 423  8280 3C               inc a
+ 424  8281 32 EC 88         ld (Y),a
+ 425  8284 C1               pop bc
+ 426  8285 10 C8            djnz pbS
+ 427  8287 E1               pop hl
+ 428  8288 D1               pop de
+ 429  8289 C1               pop bc
+ 430  828A F1               pop af
+ 431  828B C9               ret
+ 432  828C
+ 433  828C              ; ---- card : (CDX),(BAND),(CBX),(WC bytes wide),(SEL bit7),(VALPTR) -
+ 434  828C              ; white plate + pixel frame + rank glyph top-left + centered 8x8 suit sprite
+ 435  828C              ; + optional bottom value string ; selected card raised 8px ; keeps AF
+ 436  828C              cardCell:
+ 437  828C F5               push af
+ 438  828D C5               push bc
+ 439  828E D5               push de
+ 440  828F E5               push hl
+ 441  8290 3A F6 88         ld a,(BAND)
+ 442  8293 3A 01 89         ld a,(SEL)
+ 443  8296 E6 80            and $80
+ 444  8298 3A F6 88         ld a,(BAND)
+ 445  829B 28 02            jr z,noSel
+ 446  829D D6 01            sub 1                       ; selected : raise 8px = 1 band
+ 447  829F              noSel:
+ 448  829F 32 F8 88         ld (WD),a                   ; BAND MUST survive D/E table walks
+ 449  82A2                  ; attr v5 : base plate paper white + ink BLACK everywhere ;
+ 450  82A2                  ; then suit cells ONLY get red ink (mock law : H/D red , S/C black)
+ 451  82A2 3A F8 88         ld a,(WD)
+ 452  82A5 32 F9 88         ld (RR),a
+ 453  82A8 3E 05            ld a,5
+ 454  82AA 32 FB 88         ld (NR),a
+ 455  82AD 3A F7 88         ld a,(CBX)
+ 456  82B0 32 FA 88         ld (CC),a
+ 457  82B3 3A 00 89         ld a,(WC)
+ 458  82B6 32 FC 88         ld (NC),a
+ 459  82B9 21 01 89         ld hl,SEL
+ 460  82BC CB 7E            bit 7,(hl)                ; SEL test MUST NOT touch A
+ 461  82BE 3E 78            ld a,$78                  ; white paper black ink
+ 462  82C0 28 02            jr z,ccPlate
+ 463  82C2 3E 38            ld a,$38                  ; selected : yellow paper black ink (mock)
+ 464  82C4              ccPlate:
+ 465  82C4 32 FD 88         ld (ATT),a
+ 466  82C7 CD 5E 80         call rectAtt
+ 467  82CA                  ; red ink : middle column , rows WD+2..WD+3 (suit pixels live there)
+ 468  82CA 3A F5 88         ld a,(CDX)
+ 469  82CD E6 F0            and $F0
+ 470  82CF FE 10            cp $10
+ 471  82D1 28 04            jr z,ccRed
+ 472  82D3 FE 20            cp $20
+ 473  82D5 20 27            jr nz,ccNoRed
+ 474  82D7              ccRed:
+ 475  82D7 3E 7A            ld a,$7A                  ; white paper bright RED ink
+ 476  82D9 CB 7E            bit 7,(hl)              ; selected : stay RED (non-bright to match plate) — Seva law
+ 477  82DB 28 02            jr z,ccR1
+ 478  82DD 3E 6A            ld a,$6A                  ; selected : RED ink on bright YELLOW paper (std encode)
+ 479  82DF              ccR1:
+ 480  82DF 32 FD 88         ld (ATT),a
+ 481  82E2 3A F8 88         ld a,(WD)
+ 482  82E5 C6 02            add a,2
+ 483  82E7 32 F9 88         ld (RR),a
+ 484  82EA 3E 02            ld a,2
+ 485  82EC 32 FB 88         ld (NR),a
+ 486  82EF 3A F7 88         ld a,(CBX)
+ 487  82F2 3C               inc a
+ 488  82F3 32 FA 88         ld (CC),a
+ 489  82F6 3E 01            ld a,1
+ 490  82F8 32 FC 88         ld (NC),a
+ 491  82FB CD 5E 80         call rectAtt
+ 492  82FE              ccNoRed:
+ 493  82FE                  ; erase rows wd*8..wd*8+39 cols CBX..CBX+WC-1  (40px tall : mock)
+ 494  82FE 3A F8 88         ld a,(WD)
+ 495  8301 CB 27            sla a
+ 496  8303 CB 27            sla a
+ 497  8305 CB 27            sla a
+ 498  8307 32 EC 88         ld (Y),a
+ 499  830A 32 ED 88         ld (Y0),a
+ 500  830D C6 27            add a,39
+ 501  830F 32 EE 88         ld (YY),a
+ 502  8312 3A F7 88         ld a,(CBX)
+ 503  8315 32 EF 88         ld (BX),a
+ 504  8318 3A 00 89         ld a,(WC)
+ 505  831B 32 F0 88         ld (W),a
+ 506  831E 3E 00            ld a,$00
+ 507  8320 32 F1 88         ld (VAL),a
+ 508  8323 CD 9A 80         call rectPix
+ 509  8326                  ; frame top/bottom
+ 510  8326 3A ED 88         ld a,(Y0)
+ 511  8329 32 EC 88         ld (Y),a
+ 512  832C 32 EE 88         ld (YY),a
+ 513  832F 3A 00 89         ld a,(WC)
+ 514  8332 32 F0 88         ld (W),a
+ 515  8335 3E FF            ld a,$FF
+ 516  8337 32 F1 88         ld (VAL),a
+ 517  833A CD 9A 80         call rectPix
+ 518  833D 3A ED 88         ld a,(Y0)
+ 519  8340 C6 27            add a,39
+ 520  8342 32 EC 88         ld (Y),a
+ 521  8345 32 EE 88         ld (YY),a
+ 522  8348 CD 9A 80         call rectPix
+ 523  834B                  ; sides : left edge @CBX $80 ; right edge @(CBX+WC-1) $01
+ 524  834B 3A ED 88         ld a,(Y0)
+ 525  834E 3C               inc a
+ 526  834F 32 EC 88         ld (Y),a
+ 527  8352 06 26            ld b,38
+ 528  8354              ccS:
+ 529  8354 C5               push bc
+ 530  8355 3A EC 88         ld a,(Y)
+ 531  8358 32 EE 88         ld (YY),a                 ; single-row anchor : rectPix paints Y..YY
+ 532  835B 3A F7 88         ld a,(CBX)
+ 533  835E 32 EF 88         ld (BX),a
+ 534  8361 3E 80            ld a,$80
+ 535  8363 32 F1 88         ld (VAL),a
+ 536  8366 3E 01            ld a,1
+ 537  8368 32 F0 88         ld (W),a
+ 538  836B CD 9A 80         call rectPix
+ 539  836E 3A 00 89         ld a,(WC)
+ 540  8371 5F               ld e,a
+ 541  8372 3A F7 88         ld a,(CBX)
+ 542  8375 83               add a,e
+ 543  8376 3D               dec a
+ 544  8377 32 EF 88         ld (BX),a
+ 545  837A 3E 01            ld a,$01
+ 546  837C 32 F1 88         ld (VAL),a
+ 547  837F CD 9A 80         call rectPix
+ 548  8382 3A EC 88         ld a,(Y)
+ 549  8385 3C               inc a
+ 550  8386 32 EC 88         ld (Y),a
+ 551  8389 C1               pop bc
+ 552  838A 10 C8            djnz ccS
+ 553  838C                  ; rank v5 : 1px RIGHT + 1px DOWN inside frame : x=cx+1 (bit6, clears
+ 554  838C                  ; $80 border line) , y=y0+2..+8 (attrs (WD,CBX)+(WD+1,CBX) black)
+ 555  838C 21 ED 88         ld hl,Y0
+ 556  838F 7E               ld a,(hl)
+ 557  8390 CB 3F            srl a
+ 558  8392 CB 3F            srl a
+ 559  8394 CB 3F            srl a
+ 560  8396 47               ld b,a                    ; band of raised card
+ 561  8397 3A F7 88         ld a,(CBX)
+ 562  839A CB 27            sla a
+ 563  839C CB 27            sla a
+ 564  839E CB 27            sla a
+ 565  83A0 3C               inc a                     ; +1 px right of border
+ 566  83A1 4F               ld c,a
+ 567  83A2 3E 02            ld a,2
+ 568  83A4 32 06 89         ld (PYOFF),a            ; +1 px down
+ 569  83A7 21 0F 89         ld hl,RANKCH
+ 570  83AA 3A F5 88         ld a,(CDX)
+ 571  83AD E6 0F            and $0F
+ 572  83AF 5F               ld e,a
+ 573  83B0 16 00            ld d,$00
+ 574  83B2 19               add hl,de
+ 575  83B3 7E               ld a,(hl)                 ; rank ascii LAST (A is putc6's glyph arg)
+ 576  83B4 CD E4 80         call putc6
+ 577  83B7                  ; rank-value glyph for 'T' : ink block when rank ascii missing
+ 578  83B7 3A F5 88         ld a,(CDX)
+ 579  83BA E6 0F            and $0F
+ 580  83BC FE 08            cp 8
+ 581  83BE 20 1C            jr nz,ccSuit
+ 582  83C0 3A ED 88         ld a,(Y0)
+ 583  83C3 32 EC 88         ld (Y),a
+ 584  83C6 32 EE 88         ld (YY),a
+ 585  83C9 3A F7 88         ld a,(CBX)
+ 586  83CC 32 EF 88         ld (BX),a
+ 587  83CF 3E 01            ld a,1
+ 588  83D1 32 F0 88         ld (W),a
+ 589  83D4 3E FF            ld a,$FF
+ 590  83D6 32 F1 88         ld (VAL),a
+ 591  83D9 CD 9A 80         call rectPix
+ 592  83DC              ccSuit:
+ 593  83DC                  ; suit v5 : byte CBX+1 , rows y0+16..+31 -> red attrs cover exactly
+ 594  83DC 3A F5 88         ld a,(CDX)
+ 595  83DF E6 F0            and $F0
+ 596  83E1 0F               rrca
+ 597  83E2 0F               rrca
+ 598  83E3 0F               rrca
+ 599  83E4 0F               rrca
+ 600  83E5 87               add a,a
+ 601  83E6 87               add a,a
+ 602  83E7 87               add a,a
+ 603  83E8 87               add a,a                 ; suit*16
+ 604  83E9 5F               ld e,a
+ 605  83EA 16 00            ld d,$00
+ 606  83EC 21 37 8A         ld hl,SUIT16
+ 607  83EF 19               add hl,de
+ 608  83F0 22 F2 88         ld (SPR),hl
+ 609  83F3 7C               ld a,h
+ 610  83F4 32 F3 88         ld (SPR+1),a
+ 611  83F7 3A 00 89         ld a,(WC)
+ 612  83FA D6 01            sub 1
+ 613  83FC CB 3F            srl a
+ 614  83FE 5F               ld e,a
+ 615  83FF 3A F7 88         ld a,(CBX)
+ 616  8402 83               add a,e
+ 617  8403 32 EF 88         ld (BX),a
+ 618  8406 3A ED 88         ld a,(Y0)
+ 619  8409 C6 10            add a,16
+ 620  840B 32 EC 88         ld (Y),a                ; v4.2->v5 : +16 : fills attrs rows WD+2..WD+3
+ 621  840E CD C5 81         call blit16
+ 622  8411                  ; bottom value string (played cards) : y=y0+32 .. +38 , x=cx+4 , pitch 7
+ 623  8411 2A 02 89         ld hl,(VALPTR)
+ 624  8414 7C               ld a,h
+ 625  8415 B5               or l
+ 626  8416 28 3A            jr z,ccRet
+ 627  8418 3A F7 88         ld a,(CBX)
+ 628  841B CB 27            sla a
+ 629  841D CB 27            sla a
+ 630  841F CB 27            sla a
+ 631  8421 C6 04            add a,4
+ 632  8423 32 07 89         ld (VX),a
+ 633  8426              ccVL:
+ 634  8426 7E               ld a,(hl)
+ 635  8427 B7               or a
+ 636  8428 28 28            jr z,ccRet
+ 637  842A 23               inc hl
+ 638  842B E5               push hl
+ 639  842C F5               push af                    ; ascii rides to putc6
+ 640  842D 21 ED 88         ld hl,Y0
+ 641  8430 7E               ld a,(hl)
+ 642  8431 C6 20            add a,32
+ 643  8433 CB 3F            srl a
+ 644  8435 CB 3F            srl a
+ 645  8437 CB 3F            srl a
+ 646  8439 47               ld b,a                    ; band of y0+32 (raised-aware)
+ 647  843A 3A 07 89         ld a,(VX)
+ 648  843D 4F               ld c,a
+ 649  843E 3E 00            ld a,0
+ 650  8440 32 06 89         ld (PYOFF),a            ; glyph row0 lands on band row exactly
+ 651  8443 F1               pop af
+ 652  8444 CD E4 80         call putc6
+ 653  8447 3A 07 89         ld a,(VX)
+ 654  844A C6 07            add a,7
+ 655  844C 32 07 89         ld (VX),a
+ 656  844F E1               pop hl
+ 657  8450 18 D4            jr ccVL
+ 658  8452              ccRet:
+ 659  8452 3E 00            ld a,0
+ 660  8454 32 06 89         ld (PYOFF),a          ; panels expect band-origin glyphs again
+ 661  8457 3A F8 88         ld a,(WD)
+ 662  845A 32 F6 88         ld (BAND),a
+ 663  845D E1               pop hl
+ 664  845E D1               pop de
+ 665  845F C1               pop bc
+ 666  8460 F1               pop af
+ 667  8461 C9               ret
+ 668  8462
+ 669  8462              ; ---- full board ---------------------------------------------------
+ 670  8462              renderBoard:
+ 671  8462 F5               push af
+ 672  8463 C5               push bc
+ 673  8464 D5               push de
+ 674  8465 E5               push hl
+ 675  8466 3E 01            ld a,1
+ 676  8468 32 FF 88         ld (CURSOR),a
+ 677  846B                  ; ---- pass 1 : ATTRS (mock v3 colors). rectAtt contract:
+ 678  846B                  ; RR=first row, CC=first col, NR=ROW COUNT, NC=BYTE WIDTH, ATT=value
+ 679  846B                  ; field green cols11-31 b0-22
+ 680  846B 3E 00            ld a,0
+ 681  846D 32 F9 88         ld (RR),a
+ 682  8470 3E 0B            ld a,11
+ 683  8472 32 FA 88         ld (CC),a
+ 684  8475 3E 17            ld a,23
+ 685  8477 32 FB 88         ld (NR),a
+ 686  847A 3E 15            ld a,21
+ 687  847C 32 FC 88         ld (NC),a
+ 688  847F 3E 4F            ld a,$4F
+ 689  8481 32 FD 88         ld (ATT),a
+ 690  8484 CD 5E 80         call rectAtt
+ 691  8487                  ; sidebar black cols0-10 b0-22
+ 692  8487 3E 00            ld a,0
+ 693  8489 32 FA 88         ld (CC),a
+ 694  848C 3E 0B            ld a,11
+ 695  848E 32 FC 88         ld (NC),a
+ 696  8491 3E 00            ld a,$00
+ 697  8493 32 FD 88         ld (ATT),a
+ 698  8496 CD 5E 80         call rectAtt
+ 699  8499                  ; blind bar yellow b0 cols0-10 black ink
+ 700  8499 3E 68            ld a,$68
+ 701  849B 32 FD 88         ld (ATT),a
+ 702  849E 3E 01            ld a,1
+ 703  84A0 32 FB 88         ld (NR),a
+ 704  84A3 CD 5E 80         call rectAtt
+ 705  84A6                  ; sidebar cyan b1-b5
+ 706  84A6 3E 01            ld a,1
+ 707  84A8 32 F9 88         ld (RR),a
+ 708  84AB 3E 05            ld a,5
+ 709  84AD 32 FB 88         ld (NR),a
+ 710  84B0 3E 05            ld a,$05
+ 711  84B2 32 FD 88         ld (ATT),a
+ 712  84B5 CD 5E 80         call rectAtt
+ 713  84B8                  ; hand-type blue plate b6-b7 white ink (blue paper)
+ 714  84B8 3E 06            ld a,6
+ 715  84BA 32 F9 88         ld (RR),a
+ 716  84BD 3E 02            ld a,2
+ 717  84BF 32 FB 88         ld (NR),a
+ 718  84C2 3E 1F            ld a,$1F
+ 719  84C4 32 FD 88         ld (ATT),a
+ 720  84C7 CD 5E 80         call rectAtt
+ 721  84CA                  ; equation b8 : blue paper cyan ink cols0-3
+ 722  84CA 3E 08            ld a,8
+ 723  84CC 32 F9 88         ld (RR),a
+ 724  84CF 3E 00            ld a,0
+ 725  84D1 32 FA 88         ld (CC),a
+ 726  84D4 3E 01            ld a,1
+ 727  84D6 32 FB 88         ld (NR),a
+ 728  84D9 3E 04            ld a,4
+ 729  84DB 32 FC 88         ld (NC),a
+ 730  84DE 3E 0D            ld a,$0D
+ 731  84E0 32 FD 88         ld (ATT),a
+ 732  84E3 CD 5E 80         call rectAtt
+ 733  84E6                  ; gap col4 black
+ 734  84E6 3E 04            ld a,4
+ 735  84E8 32 FA 88         ld (CC),a
+ 736  84EB 3E 01            ld a,1
+ 737  84ED 32 FC 88         ld (NC),a
+ 738  84F0 3E 00            ld a,$00
+ 739  84F2 32 FD 88         ld (ATT),a
+ 740  84F5 CD 5E 80         call rectAtt
+ 741  84F8                  ; red box cols5-9
+ 742  84F8 3E 05            ld a,5
+ 743  84FA 32 FA 88         ld (CC),a
+ 744  84FD 3E 05            ld a,5
+ 745  84FF 32 FC 88         ld (NC),a
+ 746  8502 3E 17            ld a,$17
+ 747  8504 32 FD 88         ld (ATT),a
+ 748  8507 CD 5E 80         call rectAtt
+ 749  850A                  ; b9 "= $22" white-on-black (mock : cost of hand played)
+ 750  850A 3E 09            ld a,9
+ 751  850C 32 F9 88         ld (RR),a
+ 752  850F 3E 00            ld a,0
+ 753  8511 32 FA 88         ld (CC),a
+ 754  8514 3E 01            ld a,1
+ 755  8516 32 FB 88         ld (NR),a
+ 756  8519 3E 0B            ld a,11
+ 757  851B 32 FC 88         ld (NC),a
+ 758  851E 3E 07            ld a,$07
+ 759  8520 32 FD 88         ld (ATT),a
+ 760  8523 CD 5E 80         call rectAtt
+ 761  8526                  ; counter boxes b11-b14 : black paper, frame ink per mock (HANDS cyan / DISC red / ANTE yellow / ROUND white)
+ 762  8526 3E 0B            ld a,11
+ 763  8528 32 F9 88         ld (RR),a
+ 764  852B 3E 00            ld a,0
+ 765  852D 32 FA 88         ld (CC),a
+ 766  8530 3E 02            ld a,2
+ 767  8532 32 FB 88         ld (NR),a
+ 768  8535 3E 05            ld a,5
+ 769  8537 32 FC 88         ld (NC),a
+ 770  853A 3E 05            ld a,$05
+ 771  853C 32 FD 88         ld (ATT),a
+ 772  853F CD 5E 80         call rectAtt
+ 773  8542 3E 06            ld a,6
+ 774  8544 32 FA 88         ld (CC),a
+ 775  8547 3E 02            ld a,$02
+ 776  8549 32 FD 88         ld (ATT),a
+ 777  854C CD 5E 80         call rectAtt
+ 778  854F 3E 0D            ld a,13
+ 779  8551 32 F9 88         ld (RR),a
+ 780  8554 3E 00            ld a,0
+ 781  8556 32 FA 88         ld (CC),a
+ 782  8559 3E 06            ld a,$06
+ 783  855B 32 FD 88         ld (ATT),a
+ 784  855E CD 5E 80         call rectAtt
+ 785  8561 3E 06            ld a,6
+ 786  8563 32 FA 88         ld (CC),a
+ 787  8566 3E 07            ld a,$07
+ 788  8568 32 FD 88         ld (ATT),a
+ 789  856B CD 5E 80         call rectAtt
+ 790  856E                  ; b15 DECK cyan-on-black
+ 791  856E 3E 0F            ld a,15
+ 792  8570 32 F9 88         ld (RR),a
+ 793  8573 3E 00            ld a,0
+ 794  8575 32 FA 88         ld (CC),a
+ 795  8578 3E 01            ld a,1
+ 796  857A 32 FB 88         ld (NR),a
+ 797  857D 3E 0B            ld a,11
+ 798  857F 32 FC 88         ld (NC),a
+ 799  8582 3E 05            ld a,$05
+ 800  8584 32 FD 88         ld (ATT),a
+ 801  8587 CD 5E 80         call rectAtt
+ 802  858A                  ; shop chips b0-b1 : SHOP blue tag + RED/MAGENTA/CYAN chips + 2 green
+ 803  858A                  ; black-frame boxes (v5.3 : match mock cols 13-15/17-19/21-23/24-26/27-29 ,
+ 804  858A                  ; 1-col green gaps col16/col20 , NR=2 two-band tall like the mock)
+ 805  858A 3E 00            ld a,0
+ 806  858C 32 F9 88         ld (RR),a
+ 807  858F 3E 0B            ld a,11
+ 808  8591 32 FA 88         ld (CC),a
+ 809  8594 3E 02            ld a,2
+ 810  8596 32 FB 88         ld (NR),a
+ 811  8599 3E 02            ld a,2
+ 812  859B 32 FC 88         ld (NC),a
+ 813  859E 3E 1F            ld a,$1F
+ 814  85A0 32 FD 88         ld (ATT),a
+ 815  85A3 CD 5E 80         call rectAtt
+ 816  85A6 3E 0D            ld a,13
+ 817  85A8 32 FA 88         ld (CC),a
+ 818  85AB 3E 03            ld a,3
+ 819  85AD 32 FC 88         ld (NC),a
+ 820  85B0 3E 2F            ld a,$2F
+ 821  85B2 32 FD 88         ld (ATT),a
+ 822  85B5 CD 5E 80         call rectAtt
+ 823  85B8 3E 10            ld a,16
+ 824  85BA 32 FA 88         ld (CC),a
+ 825  85BD 3E 01            ld a,1
+ 826  85BF 32 FC 88         ld (NC),a
+ 827  85C2 3E 48            ld a,$48
+ 828  85C4 32 FD 88         ld (ATT),a
+ 829  85C7 CD 5E 80         call rectAtt
+ 830  85CA 3E 11            ld a,17
+ 831  85CC 32 FA 88         ld (CC),a
+ 832  85CF 3E 03            ld a,3
+ 833  85D1 32 FC 88         ld (NC),a
+ 834  85D4 3E 3F            ld a,$3F
+ 835  85D6 32 FD 88         ld (ATT),a
+ 836  85D9 CD 5E 80         call rectAtt
+ 837  85DC 3E 14            ld a,20
+ 838  85DE 32 FA 88         ld (CC),a
+ 839  85E1 3E 01            ld a,1
+ 840  85E3 32 FC 88         ld (NC),a
+ 841  85E6 3E 48            ld a,$48
+ 842  85E8 32 FD 88         ld (ATT),a
+ 843  85EB CD 5E 80         call rectAtt
+ 844  85EE 3E 15            ld a,21
+ 845  85F0 32 FA 88         ld (CC),a
+ 846  85F3 3E 03            ld a,3
+ 847  85F5 32 FC 88         ld (NC),a
+ 848  85F8 3E 5F            ld a,$5F
+ 849  85FA 32 FD 88         ld (ATT),a
+ 850  85FD CD 5E 80         call rectAtt
+ 851  8600 3E 18            ld a,24
+ 852  8602 32 FA 88         ld (CC),a
+ 853  8605 3E 03            ld a,3
+ 854  8607 32 FC 88         ld (NC),a
+ 855  860A 3E 48            ld a,$48
+ 856  860C 32 FD 88         ld (ATT),a
+ 857  860F CD 5E 80         call rectAtt
+ 858  8612 3E 1B            ld a,27
+ 859  8614 32 FA 88         ld (CC),a
+ 860  8617 3E 03            ld a,3
+ 861  8619 32 FC 88         ld (NC),a
+ 862  861C 3E 48            ld a,$48
+ 863  861E 32 FD 88         ld (ATT),a
+ 864  8621 CD 5E 80         call rectAtt
+ 865  8624 3E 1E            ld a,30
+ 866  8626 32 FA 88         ld (CC),a
+ 867  8629 3E 02            ld a,2
+ 868  862B 32 FC 88         ld (NC),a
+ 869  862E 3E 48            ld a,$48
+ 870  8630 32 FD 88         ld (ATT),a
+ 871  8633 CD 5E 80         call rectAtt
+ 872  8636                  ; popup +10 b8 cols13-15 green/yellow
+ 873  8636 3E 08            ld a,8
+ 874  8638 32 F9 88         ld (RR),a
+ 875  863B 3E 0D            ld a,13
+ 876  863D 32 FA 88         ld (CC),a
+ 877  8640 3E 01            ld a,1
+ 878  8642 32 FB 88         ld (NR),a
+ 879  8645 3E 03            ld a,3
+ 880  8647 32 FC 88         ld (NC),a
+ 881  864A 3E 4E            ld a,$4E
+ 882  864C 32 FD 88         ld (ATT),a
+ 883  864F CD 5E 80         call rectAtt
+ 884  8652                  ; (PLAYED white plates : per-card via cardCell)
+ 885  8652                  ; arrows b16
+ 886  8652 3E 10            ld a,16
+ 887  8654 32 F9 88         ld (RR),a
+ 888  8657 3E 0B            ld a,11
+ 889  8659 32 FA 88         ld (CC),a
+ 890  865C 3E 01            ld a,1
+ 891  865E 32 FB 88         ld (NR),a
+ 892  8661 3E 11            ld a,17
+ 893  8663 32 FC 88         ld (NC),a
+ 894  8666 3E 4E            ld a,$4E
+ 895  8668 32 FD 88         ld (ATT),a
+ 896  866B CD 5E 80         call rectAtt
+ 897  866E                  ; (HAND white plates : per-card via cardCell)
+ 898  866E                  ; cmd bar b23 : label cols0-13 black-on-white? mock=dark strip
+ 899  866E 3E 17            ld a,23
+ 900  8670 32 F9 88         ld (RR),a
+ 901  8673 3E 00            ld a,0
+ 902  8675 32 FA 88         ld (CC),a
+ 903  8678 3E 01            ld a,1
+ 904  867A 32 FB 88         ld (NR),a
+ 905  867D 3E 0E            ld a,14
+ 906  867F 32 FC 88         ld (NC),a
+ 907  8682 3E 05            ld a,$05
+ 908  8684 32 FD 88         ld (ATT),a
+ 909  8687 CD 5E 80         call rectAtt
+ 910  868A 3E 0E            ld a,14
+ 911  868C 32 FA 88         ld (CC),a
+ 912  868F 3E 12            ld a,18
+ 913  8691 32 FC 88         ld (NC),a
+ 914  8694 3E 07            ld a,$07
+ 915  8696 32 FD 88         ld (ATT),a
+ 916  8699 CD 5E 80         call rectAtt
+ 917  869C
+ 918  869C                  ; ---- pass 2 : TEXT ----
+ 919  869C 06 00            ld b,0
+ 920  869E 0E 04            ld c,4
+ 921  86A0 21 64 89         ld hl,TXT_BLIND
+ 922  86A3 CD 72 81         call drawstr6
+ 923  86A6 06 01            ld b,1
+ 924  86A8 0E 04            ld c,4
+ 925  86AA 21 6E 89         ld hl,TXT_SCORE
+ 926  86AD CD 72 81         call drawstr6
+ 927  86B0                  ; chip sprite + 1200
+ 928  86B0 21 4F 89         ld hl,CHIP8
+ 929  86B3 22 F2 88         ld (SPR),hl
+ 930  86B6 7C               ld a,h
+ 931  86B7 32 F3 88         ld (SPR+1),a
+ 932  86BA 3E 02            ld a,2
+ 933  86BC 32 F6 88         ld (BAND),a
+ 934  86BF 3E 00            ld a,0
+ 935  86C1 32 EF 88         ld (BX),a
+ 936  86C4 CD A8 81         call blit8
+ 937  86C7 06 02            ld b,2
+ 938  86C9 0E 10            ld c,16
+ 939  86CB 21 7B 89         ld hl,TXT_1200
+ 940  86CE CD 72 81         call drawstr6
+ 941  86D1 06 03            ld b,3
+ 942  86D3 0E 04            ld c,4
+ 943  86D5 21 8B 89         ld hl,TXT_ADVANCE
+ 944  86D8 CD 72 81         call drawstr6
+ 945  86DB 06 04            ld b,4
+ 946  86DD 0E 04            ld c,4
+ 947  86DF 21 96 89         ld hl,TXT_RSCORE
+ 948  86E2 CD 72 81         call drawstr6
+ 949  86E5 21 4F 89         ld hl,CHIP8
+ 950  86E8 22 F2 88         ld (SPR),hl
+ 951  86EB 7C               ld a,h
+ 952  86EC 32 F3 88         ld (SPR+1),a
+ 953  86EF 3E 05            ld a,5
+ 954  86F1 32 F6 88         ld (BAND),a
+ 955  86F4 3E 00            ld a,0
+ 956  86F6 32 EF 88         ld (BX),a
+ 957  86F9 CD A8 81         call blit8
+ 958  86FC 06 05            ld b,5
+ 959  86FE 0E 10            ld c,16
+ 960  8700 21 80 89         ld hl,TXT_0
+ 961  8703 CD 72 81         call drawstr6
+ 962  8706 06 06            ld b,6
+ 963  8708 0E 07            ld c,7
+ 964  870A 21 A5 89         ld hl,TXT_PAIR
+ 965  870D CD 72 81         call drawstr6
+ 966  8710 06 06            ld b,6
+ 967  8712 0E 3A            ld c,58
+ 968  8714 21 82 89         ld hl,TXT_L1
+ 969  8717 CD 72 81         call drawstr6
+ 970  871A 06 08            ld b,8
+ 971  871C 0E 0A            ld c,10
+ 972  871E 21 AE 89         ld hl,TXT_C40
+ 973  8721 CD 72 81         call drawstr6
+ 974  8724 3E D7            ld a,$D7                  ; times glyph via FONT6X
+ 975  8726 06 08            ld b,8
+ 976  8728 0E 22            ld c,34
+ 977  872A CD E4 80         call putc6
+ 978  872D 06 08            ld b,8
+ 979  872F 0E 32            ld c,50
+ 980  8731 21 C3 89         ld hl,TXT_M2
+ 981  8734 CD 72 81         call drawstr6
+ 982  8737 06 09            ld b,9
+ 983  8739 0E 04            ld c,4
+ 984  873B 21 85 89         ld hl,TXT_EQ
+ 985  873E CD 72 81         call drawstr6
+ 986  8741                  ; counter boxes : pixel frames b11-b12 cols0-4/cols6-10 , b13-b14 same cols
+ 987  8741 3E 0B            ld a,11
+ 988  8743 32 F9 88         ld (RR),a
+ 989  8746 3E 01            ld a,1
+ 990  8748 32 05 89         ld (PBH),a
+ 991  874B 3E 00            ld a,0
+ 992  874D 32 FA 88         ld (CC),a
+ 993  8750 3E 05            ld a,5
+ 994  8752 32 04 89         ld (NB),a
+ 995  8755 CD F0 81         call pbox
+ 996  8758 3E 06            ld a,6
+ 997  875A 32 FA 88         ld (CC),a
+ 998  875D CD F0 81         call pbox
+ 999  8760 3E 0D            ld a,13
+1000  8762 32 F9 88         ld (RR),a
+1001  8765 3E 00            ld a,0
+1002  8767 32 FA 88         ld (CC),a
+1003  876A CD F0 81         call pbox
+1004  876D 3E 06            ld a,6
+1005  876F 32 FA 88         ld (CC),a
+1006  8772 CD F0 81         call pbox
+1007  8775 06 0B            ld b,11
+1008  8777 0E 04            ld c,4
+1009  8779 21 C5 89         ld hl,TXT_HANDS
+1010  877C CD 72 81         call drawstr6
+1011  877F 06 0C            ld b,12
+1012  8781 0E 10            ld c,16
+1013  8783 21 CB 89         ld hl,TXT_THREE
+1014  8786 CD 72 81         call drawstr6
+1015  8789 06 0B            ld b,11
+1016  878B 0E 34            ld c,52
+1017  878D 21 CD 89         ld hl,TXT_DISC
+1018  8790 CD 72 81         call drawstr6
+1019  8793 06 0C            ld b,12
+1020  8795 0E 40            ld c,64
+1021  8797 21 D2 89         ld hl,TXT_TWO
+1022  879A CD 72 81         call drawstr6
+1023  879D 06 0D            ld b,13
+1024  879F 0E 04            ld c,4
+1025  87A1 21 D4 89         ld hl,TXT_ANTE
+1026  87A4 CD 72 81         call drawstr6
+1027  87A7 06 0E            ld b,14
+1028  87A9 0E 10            ld c,16
+1029  87AB 21 D9 89         ld hl,TXT_2OF6
+1030  87AE CD 72 81         call drawstr6
+1031  87B1 06 0D            ld b,13
+1032  87B3 0E 32            ld c,50
+1033  87B5 21 DD 89         ld hl,TXT_ROUND
+1034  87B8 CD 72 81         call drawstr6
+1035  87BB 06 0E            ld b,14
+1036  87BD 0E 40            ld c,64
+1037  87BF 21 E3 89         ld hl,TXT_FOUR
+1038  87C2 CD 72 81         call drawstr6
+1039  87C5 06 0F            ld b,15
+1040  87C7 0E 04            ld c,4
+1041  87C9 21 E5 89         ld hl,TXT_DECK
+1042  87CC CD 72 81         call drawstr6
+1043  87CF                  ; shop tag blank-box frames b0-b1 cols24-26 & cols27-29 (v5.3 mock cols)
+1044  87CF 3E 00            ld a,0
+1045  87D1 32 F9 88         ld (RR),a
+1046  87D4 3E 01            ld a,1
+1047  87D6 32 05 89         ld (PBH),a
+1048  87D9 3E 18            ld a,24
+1049  87DB 32 FA 88         ld (CC),a
+1050  87DE 3E 03            ld a,3
+1051  87E0 32 04 89         ld (NB),a
+1052  87E3 CD F0 81         call pbox
+1053  87E6 3E 1B            ld a,27
+1054  87E8 32 FA 88         ld (CC),a
+1055  87EB CD F0 81         call pbox
+1056  87EE                  ; shop tags
+1057  87EE                  ; shop tags : INSIDE their chips (v5.3) : b1 y8-14 centered on 3-col chips
+1058  87EE 06 01            ld b,1
+1059  87F0 0E 6B            ld c,107
+1060  87F2 21 B1 89         ld hl,TXT_4M
+1061  87F5 CD 72 81         call drawstr6
+1062  87F8 06 01            ld b,1
+1063  87FA 0E 8B            ld c,139
+1064  87FC 21 B5 89         ld hl,TXT_8M
+1065  87FF CD 72 81         call drawstr6
+1066  8802 06 01            ld b,1
+1067  8804 0E AB            ld c,171
+1068  8806 21 B9 89         ld hl,TXT_H2
+1069  8809 CD 72 81         call drawstr6
+1070  880C                  ; popup +10 (yellow ink b8 x104)
+1071  880C 06 08            ld b,8
+1072  880E 0E 68            ld c,104
+1073  8810 21 BD 89         ld hl,TXT_P10
+1074  8813 CD 72 81         call drawstr6
+1075  8816                  ; cmd bar full : pixel x4 band23
+1076  8816 06 17            ld b,23
+1077  8818 0E 04            ld c,4
+1078  881A 21 ED 89         ld hl,TXT_CMD
+1079  881D CD 72 81         call drawstr6
+1080  8820
+1081  8820                  ; ---- pass 3 : PLAYED cards : WC=3 cols12/16/20/24/28 b10 ----
+1082  8820 DD 21 57 89      ld ix,PLAYEDC
+1083  8824 11 1C 89         ld de,RANKVAL
+1084  8827 3E 03            ld a,3
+1085  8829 32 00 89         ld (WC),a
+1086  882C 3E 0C            ld a,12
+1087  882E 32 F7 88         ld (CBX),a
+1088  8831 06 05            ld b,5                      ; cardCell clobbers DE -> count on BC (preserved)
+1089  8833              pdL:
+1090  8833 AF               xor a
+1091  8834 32 01 89         ld (SEL),a
+1092  8837 DD 7E 00         ld a,(ix)
+1093  883A 32 F5 88         ld (CDX),a
+1094  883D 3E 0A            ld a,10
+1095  883F 32 F6 88         ld (BAND),a
+1096  8842 ED 53 02 89      ld (VALPTR),de
+1097  8846                  ; first card lit : raised + yellow ink
+1098  8846 78               ld a,b
+1099  8847 FE 05            cp 5
+1100  8849 20 05            jr nz,nopd1
+1101  884B 3E 80            ld a,$80
+1102  884D 32 01 89         ld (SEL),a
+1103  8850              nopd1:
+1104  8850 CD 8C 82         call cardCell
+1105  8853 DD 23            inc ix
+1106  8855 3A 02 89         ld a,(VALPTR)
+1107  8858 C6 04            add a,4
+1108  885A 32 02 89         ld (VALPTR),a
+1109  885D 3A F7 88         ld a,(CBX)
+1110  8860 C6 04            add a,4
+1111  8862 32 F7 88         ld (CBX),a
+1112  8865 05               dec b
+1113  8866 C2 33 88         jp nz,pdL
+1114  8869 3E 00            ld a,0
+1115  886B 32 01 89         ld (SEL),a
+1116  886E
+1117  886E                  ; ---- pass 4 : HAND cards : WC=2 cols11..26 pitch2 b17 ----
+1118  886E 21 5C 89         ld hl,HANDC
+1119  8871 22 E2 88         ld (HANDP),hl
+1120  8874 3E 0B            ld a,11
+1121  8876 06 08            ld b,8                      ; count on BC : cardCell preserves BC
+1122  8878              hdL:
+1123  8878 32 F7 88         ld (CBX),a
+1124  887B 2A E2 88         ld hl,(HANDP)
+1125  887E 7E               ld a,(hl)
+1126  887F 32 F5 88         ld (CDX),a
+1127  8882 3E 11            ld a,17
+1128  8884 32 F6 88         ld (BAND),a
+1129  8887                  ; standalone static board : NO raise (live engine raises via CURSOR ; here
+1130  8887                  ; raised hand card smears stale bytes into played area and nothing repaints)
+1131  8887 AF               xor a
+1132  8888 32 01 89         ld (SEL),a
+1133  888B 3A FF 88         ld a,(CURSOR)       ; keep CURSOR logic untouched for engine parity
+1134  888E FE 00            cp 0
+1135  8890 21 00 00         ld hl,0
+1136  8893 22 02 89         ld (VALPTR),hl
+1137  8896 CD 8C 82         call cardCell
+1138  8899 2A E2 88         ld hl,(HANDP)
+1139  889C 23               inc hl
+1140  889D 22 E2 88         ld (HANDP),hl
+1141  88A0 3A F7 88         ld a,(CBX)
+1142  88A3 C6 02            add a,2
+1143  88A5 05               dec b
+1144  88A6 C2 78 88         jp nz,hdL
+1145  88A9 3E 00            ld a,0
+1146  88AB 32 01 89         ld (SEL),a
+1147  88AE                  ; arrow above cursor slot (yellow via $FF pixels + ink6 attr row b16)
+1148  88AE 3A FF 88         ld a,(CURSOR)
+1149  88B1 87               add a,a
+1150  88B2 C6 0B            add a,11
+1151  88B4 32 EF 88         ld (BX),a
+1152  88B7 21 47 89         ld hl,CURSOR8
+1153  88BA 22 F2 88         ld (SPR),hl
+1154  88BD 7C               ld a,h
+1155  88BE 32 F3 88         ld (SPR+1),a
+1156  88C1 3E 10            ld a,16
+1157  88C3 CB 27            sla a
+1158  88C5 CB 27            sla a
+1159  88C7 CB 27            sla a
+1160  88C9 D6 08            sub 8                 ; raised : arrow meets raised card top
+1161  88CB 32 EC 88         ld (Y),a
+1162  88CE CD A8 81         call blit8
+1163  88D1 E1               pop hl
+1164  88D2 D1               pop de
+1165  88D3 C1               pop bc
+1166  88D4 F1               pop af
+1167  88D5 C9               ret
+1168  88D6
+1169  88D6              ; fillAtt2 : HL=dest,BC=count,A=val ; keeps A (dec bc sets Z natively!)
+1170  88D6              fillAtt2:
+1171  88D6 77               ld (hl),a
+1172  88D7 23               inc hl
+1173  88D8 0B               dec bc
+1174  88D9 20 FB            jr nz,fillAtt2
+1175  88DB C9               ret
+1176  88DC
+1177  88DC              ; ---- globals ----
+1178  88DC 00           DSB:    ds 1
+1179  88DD 00           DSX:    ds 1
+1180  88DE 00 00        DSHL:   ds 2
+1181  88E0 00 00        PSH:    ds 2
+1182  88E2 00 00        HANDP:  ds 2
+1183  88E4              PHASE14:
+1184  88E4 00 0E 1C 2A      DEFB 0,14,28,42,56,70,84,98
+1184  88E8 38 46 54 62
+1185  88EC 00           Y:      ds 1
+1186  88ED 00           Y0:     ds 1
+1187  88EE 00           YY:     ds 1
+1188  88EF 00           BX:     ds 1
+1189  88F0 00           W:      ds 1
+1190  88F1 00           VAL:    ds 1
+1191  88F2 00 00        SPR:    ds 2
+1192  88F4 00           SPRO:   ds 1
+1193  88F5 00           CDX:    ds 1
+1194  88F6 00           BAND:   ds 1
+1195  88F7 00           CBX:    ds 1
+1196  88F8 00           WD:     ds 1
+1197  88F9 00           RR:     ds 1
+1198  88FA 00           CC:     ds 1
+1199  88FB 00           NR:     ds 1
+1200  88FC 00           NC:     ds 1
+1201  88FD 00           ATT:    ds 1
+1202  88FE 00           RCNT:   ds 1
+1203  88FF 00           CURSOR: ds 1
+1204  8900 00           WC:     ds 1
+1205  8901 00           SEL:    ds 1
+1206  8902 00 00        VALPTR: ds 2
+1207  8904 00           NB:     ds 1
+1208  8905 00           PBH:    ds 1
+1209  8906 00           PYOFF:  ds 1                    ; v5 : glyph pixel-row origin within band
+1210  8907 00           VX:     ds 1                    ; v5 : value-string pixel x
+1211  8908 00 00        SB:     ds 2
+1212  890A 00 00        SHL:    ds 2
+1213  890C 00 00        G8:     ds 2
+1214  890E 07           PAGEV:  DEFB $07
+1215  890F              ; rank ascii by idx 0..12 (idx0='2' ... idx8='1','T' pair not possible :
+1216  890F              ; idx8 uses '#' lookalike? use ROM char $90? -> use T with explanation)
+1217  890F 32 33 34 35  RANKCH: DEFB "23456789TJQKA"
+1217  8913 36 37 38 39
+1217  8917 54 4A 51 4B
+1217  891B 41
+1218  891C              RANKVAL: ; played-card bottom value = rank VALUE (mock v3: J/K show "10") , stride 4
+1219  891C 31 30 00 00      DEFB "10",0,0
+1220  8920 31 30 00 00      DEFB "10",0,0
+1221  8924 31 30 00 00      DEFB "10",0,0
+1222  8928 38 00 00 00      DEFB "8",0,0,0
+1223  892C 39 00 00 00      DEFB "9",0,0,0
+1224  8930 38 00 20 00      DEFB "8",0," ",0
+1225  8934 39 00 20 00      DEFB "9",0," ",0
+1226  8938 31 30 00         DEFB "10",0
+1227  893B 31 30 00         DEFB "10",0
+1228  893E 31 30 00         DEFB "10",0
+1229  8941 31 30 00         DEFB "10",0
+1230  8944 31 31 00         DEFB "11",0
+1231  8947              CURSOR8:
+1232  8947 00 20 20 F8      DB $00,$20,$20,$F8,$F8,$20,$20,$00
+1232  894B F8 20 20 00
+1233  894F              CHIP8:
+1234  894F 10 38 7C FE      DB $10,$38,$7C,$FE,$7C,$38,$10,$00
+1234  8953 7C 38 10 00
+1235  8957              PLAYEDC:
+1236  8957 1B 3B 2B 06      DEFB $1B,$3B,$2B,$06,$37      ; Jh Js Kd 8c 9s (mock v3)
+1236  895B 37
+1237  895C              HANDC:
+1238  895C 3C 2C 1C 0B      DEFB $3C,$2C,$1C,$0B,$2A,$15,$01,$09  ; As Ah Ad Kc Qh 7d 3c Jc mock
+1238  8960 2A 15 01 09
+1239  8964
+1240  8964              ; ---- texts ----
+1241  8964 42 49 47 20  TXT_BLIND:   DEFB "BIG BLIND",0
+1241  8968 42 4C 49 4E
+1241  896C 44 00
+1242  896E 53 43 4F 52  TXT_SCORE:   DEFB "SCORE NEEDED",0
+1242  8972 45 20 4E 45
+1242  8976 45 44 45 44
+1242  897A 00
+1243  897B 31 32 30 30  TXT_1200:    DEFB "1200",0
+1243  897F 00
+1244  8980 30 00        TXT_0:       DEFB "0",0
+1245  8982 4C 31 00     TXT_L1:      DEFB "L1",0
+1246  8985 3D 20 24 32  TXT_EQ:      DEFB "= $22",0
+1246  8989 32 00
+1247  898B 54 4F 20 41  TXT_ADVANCE: DEFB "TO ADVANCE",0
+1247  898F 44 56 41 4E
+1247  8993 43 45 00
+1248  8996 52 4F 55 4E  TXT_RSCORE:  DEFB "ROUND SCORE",0
+1248  899A 44 20 53 43
+1248  899E 4F 52 45 00
+1249  89A2 24 30 00     TXT_ZERO:    DEFB "$0",0
+1250  89A5 54 57 4F 20  TXT_PAIR:    DEFB "TWO PAIR",0
+1250  89A9 50 41 49 52
+1250  89AD 00
+1251  89AE 34 30 00     TXT_C40:     DEFB "40",0
+1252  89B1 2B 34 4D 00  TXT_4M:      DEFB "+4M",0
+1253  89B5 2B 38 4D 00  TXT_8M:      DEFB "+8M",0
+1254  89B9 48 2B 32 00  TXT_H2:      DEFB "H+2",0
+1255  89BD 2B 31 30 00  TXT_P10:     DEFB "+10",0
+1256  89C1 58 00        TXT_X:       DEFB "X",0
+1257  89C3 32 00        TXT_M2:      DEFB "2",0
+1258  89C5
+1259  89C5 48 41 4E 44  TXT_HANDS:   DEFB "HANDS",0
+1259  89C9 53 00
+1260  89CB 34 00        TXT_THREE:   DEFB "4",0
+1261  89CD 44 49 53 43  TXT_DISC:    DEFB "DISC",0
+1261  89D1 00
+1262  89D2 32 00        TXT_TWO:     DEFB "2",0
+1263  89D4 41 4E 54 45  TXT_ANTE:    DEFB "ANTE",0
+1263  89D8 00
+1264  89D9 32 2F 36 00  TXT_2OF6:    DEFB "2/6",0
+1265  89DD 52 4F 55 4E  TXT_ROUND:   DEFB "ROUND",0
+1265  89E1 44 00
+1266  89E3 34 00        TXT_FOUR:    DEFB "4",0
+1267  89E5 44 45 43 4B  TXT_DECK:    DEFB "DECK 44",0
+1267  89E9 20 34 34 00
+1268  89ED 3C 3E 4D 4F  TXT_CMD:     DEFB "<>MOVE ENTER=SEL SPACE=PLAY D=DISC Q=EXIT",0
+1268  89F1 56 45 20 45
+1268  89F5 4E 54 45 52
+1268  89F9 3D 53 45 4C
+1268  89FD 20 53 50 41
+1268  8A01 43 45 3D 50
+1268  8A05 4C 41 59 20
+1268  8A09 44 3D 44 49
+1268  8A0D 53 43 20 51
+1268  8A11 3D 45 58 49
+1268  8A15 54 00
+1269  8A17
+1270  8A17              ; ---- suit sprites 8x8 x4 : clubs spades hearts diamonds ----
+1271  8A17              SUIT8: ; MUST follow CDX suit nibble law 0=C 1=H 2=D 3=S (was shuffled -> wrong suits)
+1272  8A17 18 3C 3C 18      DB $18,$3C,$3C,$18,$FF,$7E,$18,$3C   ; club
+1272  8A1B FF 7E 18 3C
+1273  8A1F 66 FF FF FF      DB $66,$FF,$FF,$FF,$7E,$3C,$18,$00   ; heart
+1273  8A23 7E 3C 18 00
+1274  8A27 18 3C 7E FF      DB $18,$3C,$7E,$FF,$FF,$7E,$3C,$18   ; diamond
+1274  8A2B FF 7E 3C 18
+1275  8A2F 18 3C 7E FF      DB $18,$3C,$7E,$FF,$FF,$3C,$18,$3C   ; spade
+1275  8A33 FF 3C 18 3C
+1276  8A37              ; ---- SUIT16 : big suits for 40px cards (mock v3) , same nibble law ----
+1277  8A37              SUIT16:
+1278  8A37 18 18 3C 3C      DB $18,$18,$3C,$3C,$18,$18,$FF,$FF
+1278  8A3B 18 18 FF FF
+1279  8A3F 7E 7E 18 18      DB $7E,$7E,$18,$18,$18,$3C,$3C,$00   ; club
+1279  8A43 18 3C 3C 00
+1280  8A47 66 FF FF FF      DB $66,$FF,$FF,$FF,$FF,$FF,$7E,$7E
+1280  8A4B FF FF 7E 7E
+1281  8A4F 3C 3C 18 18      DB $3C,$3C,$18,$18,$00,$00,$00,$00   ; heart
+1281  8A53 00 00 00 00
+1282  8A57 18 18 3C 3C      DB $18,$18,$3C,$3C,$7E,$7E,$FF,$FF
+1282  8A5B 7E 7E FF FF
+1283  8A5F FF FF 7E 7E      DB $FF,$FF,$7E,$7E,$3C,$3C,$18,$18   ; diamond
+1283  8A63 3C 3C 18 18
+1284  8A67 18 18 3C 3C      DB $18,$18,$3C,$3C,$7E,$7E,$FF,$FF
+1284  8A6B 7E 7E FF FF
+1285  8A6F FF 7E 3C 18      DB $FF,$7E,$3C,$18,$18,$3C,$3C,$00   ; spade
+1285  8A73 18 3C 3C 00
+1286  8A77
+1287  8A77              ROWTAB:
+1288  8A77 00 40            DW $4000
+1289  8A79 00 41            DW $4100
+1290  8A7B 00 42            DW $4200
+1291  8A7D 00 43            DW $4300
+1292  8A7F 00 44            DW $4400
+1293  8A81 00 45            DW $4500
+1294  8A83 00 46            DW $4600
+1295  8A85 00 47            DW $4700
+1296  8A87 20 40            DW $4020
+1297  8A89 20 41            DW $4120
+1298  8A8B 20 42            DW $4220
+1299  8A8D 20 43            DW $4320
+1300  8A8F 20 44            DW $4420
+1301  8A91 20 45            DW $4520
+1302  8A93 20 46            DW $4620
+1303  8A95 20 47            DW $4720
+1304  8A97 40 40            DW $4040
+1305  8A99 40 41            DW $4140
+1306  8A9B 40 42            DW $4240
+1307  8A9D 40 43            DW $4340
+1308  8A9F 40 44            DW $4440
+1309  8AA1 40 45            DW $4540
+1310  8AA3 40 46            DW $4640
+1311  8AA5 40 47            DW $4740
+1312  8AA7 60 40            DW $4060
+1313  8AA9 60 41            DW $4160
+1314  8AAB 60 42            DW $4260
+1315  8AAD 60 43            DW $4360
+1316  8AAF 60 44            DW $4460
+1317  8AB1 60 45            DW $4560
+1318  8AB3 60 46            DW $4660
+1319  8AB5 60 47            DW $4760
+1320  8AB7 80 40            DW $4080
+1321  8AB9 80 41            DW $4180
+1322  8ABB 80 42            DW $4280
+1323  8ABD 80 43            DW $4380
+1324  8ABF 80 44            DW $4480
+1325  8AC1 80 45            DW $4580
+1326  8AC3 80 46            DW $4680
+1327  8AC5 80 47            DW $4780
+1328  8AC7 A0 40            DW $40A0
+1329  8AC9 A0 41            DW $41A0
+1330  8ACB A0 42            DW $42A0
+1331  8ACD A0 43            DW $43A0
+1332  8ACF A0 44            DW $44A0
+1333  8AD1 A0 45            DW $45A0
+1334  8AD3 A0 46            DW $46A0
+1335  8AD5 A0 47            DW $47A0
+1336  8AD7 C0 40            DW $40C0
+1337  8AD9 C0 41            DW $41C0
+1338  8ADB C0 42            DW $42C0
+1339  8ADD C0 43            DW $43C0
+1340  8ADF C0 44            DW $44C0
+1341  8AE1 C0 45            DW $45C0
+1342  8AE3 C0 46            DW $46C0
+1343  8AE5 C0 47            DW $47C0
+1344  8AE7 E0 40            DW $40E0
+1345  8AE9 E0 41            DW $41E0
+1346  8AEB E0 42            DW $42E0
+1347  8AED E0 43            DW $43E0
+1348  8AEF E0 44            DW $44E0
+1349  8AF1 E0 45            DW $45E0
+1350  8AF3 E0 46            DW $46E0
+1351  8AF5 E0 47            DW $47E0
+1352  8AF7 00 48            DW $4800
+1353  8AF9 00 49            DW $4900
+1354  8AFB 00 4A            DW $4A00
+1355  8AFD 00 4B            DW $4B00
+1356  8AFF 00 4C            DW $4C00
+1357  8B01 00 4D            DW $4D00
+1358  8B03 00 4E            DW $4E00
+1359  8B05 00 4F            DW $4F00
+1360  8B07 20 48            DW $4820
+1361  8B09 20 49            DW $4920
+1362  8B0B 20 4A            DW $4A20
+1363  8B0D 20 4B            DW $4B20
+1364  8B0F 20 4C            DW $4C20
+1365  8B11 20 4D            DW $4D20
+1366  8B13 20 4E            DW $4E20
+1367  8B15 20 4F            DW $4F20
+1368  8B17 40 48            DW $4840
+1369  8B19 40 49            DW $4940
+1370  8B1B 40 4A            DW $4A40
+1371  8B1D 40 4B            DW $4B40
+1372  8B1F 40 4C            DW $4C40
+1373  8B21 40 4D            DW $4D40
+1374  8B23 40 4E            DW $4E40
+1375  8B25 40 4F            DW $4F40
+1376  8B27 60 48            DW $4860
+1377  8B29 60 49            DW $4960
+1378  8B2B 60 4A            DW $4A60
+1379  8B2D 60 4B            DW $4B60
+1380  8B2F 60 4C            DW $4C60
+1381  8B31 60 4D            DW $4D60
+1382  8B33 60 4E            DW $4E60
+1383  8B35 60 4F            DW $4F60
+1384  8B37 80 48            DW $4880
+1385  8B39 80 49            DW $4980
+1386  8B3B 80 4A            DW $4A80
+1387  8B3D 80 4B            DW $4B80
+1388  8B3F 80 4C            DW $4C80
+1389  8B41 80 4D            DW $4D80
+1390  8B43 80 4E            DW $4E80
+1391  8B45 80 4F            DW $4F80
+1392  8B47 A0 48            DW $48A0
+1393  8B49 A0 49            DW $49A0
+1394  8B4B A0 4A            DW $4AA0
+1395  8B4D A0 4B            DW $4BA0
+1396  8B4F A0 4C            DW $4CA0
+1397  8B51 A0 4D            DW $4DA0
+1398  8B53 A0 4E            DW $4EA0
+1399  8B55 A0 4F            DW $4FA0
+1400  8B57 C0 48            DW $48C0
+1401  8B59 C0 49            DW $49C0
+1402  8B5B C0 4A            DW $4AC0
+1403  8B5D C0 4B            DW $4BC0
+1404  8B5F C0 4C            DW $4CC0
+1405  8B61 C0 4D            DW $4DC0
+1406  8B63 C0 4E            DW $4EC0
+1407  8B65 C0 4F            DW $4FC0
+1408  8B67 E0 48            DW $48E0
+1409  8B69 E0 49            DW $49E0
+1410  8B6B E0 4A            DW $4AE0
+1411  8B6D E0 4B            DW $4BE0
+1412  8B6F E0 4C            DW $4CE0
+1413  8B71 E0 4D            DW $4DE0
+1414  8B73 E0 4E            DW $4EE0
+1415  8B75 E0 4F            DW $4FE0
+1416  8B77 00 50            DW $5000
+1417  8B79 00 51            DW $5100
+1418  8B7B 00 52            DW $5200
+1419  8B7D 00 53            DW $5300
+1420  8B7F 00 54            DW $5400
+1421  8B81 00 55            DW $5500
+1422  8B83 00 56            DW $5600
+1423  8B85 00 57            DW $5700
+1424  8B87 20 50            DW $5020
+1425  8B89 20 51            DW $5120
+1426  8B8B 20 52            DW $5220
+1427  8B8D 20 53            DW $5320
+1428  8B8F 20 54            DW $5420
+1429  8B91 20 55            DW $5520
+1430  8B93 20 56            DW $5620
+1431  8B95 20 57            DW $5720
+1432  8B97 40 50            DW $5040
+1433  8B99 40 51            DW $5140
+1434  8B9B 40 52            DW $5240
+1435  8B9D 40 53            DW $5340
+1436  8B9F 40 54            DW $5440
+1437  8BA1 40 55            DW $5540
+1438  8BA3 40 56            DW $5640
+1439  8BA5 40 57            DW $5740
+1440  8BA7 60 50            DW $5060
+1441  8BA9 60 51            DW $5160
+1442  8BAB 60 52            DW $5260
+1443  8BAD 60 53            DW $5360
+1444  8BAF 60 54            DW $5460
+1445  8BB1 60 55            DW $5560
+1446  8BB3 60 56            DW $5660
+1447  8BB5 60 57            DW $5760
+1448  8BB7 80 50            DW $5080
+1449  8BB9 80 51            DW $5180
+1450  8BBB 80 52            DW $5280
+1451  8BBD 80 53            DW $5380
+1452  8BBF 80 54            DW $5480
+1453  8BC1 80 55            DW $5580
+1454  8BC3 80 56            DW $5680
+1455  8BC5 80 57            DW $5780
+1456  8BC7 A0 50            DW $50A0
+1457  8BC9 A0 51            DW $51A0
+1458  8BCB A0 52            DW $52A0
+1459  8BCD A0 53            DW $53A0
+1460  8BCF A0 54            DW $54A0
+1461  8BD1 A0 55            DW $55A0
+1462  8BD3 A0 56            DW $56A0
+1463  8BD5 A0 57            DW $57A0
+1464  8BD7 C0 50            DW $50C0
+1465  8BD9 C0 51            DW $51C0
+1466  8BDB C0 52            DW $52C0
+1467  8BDD C0 53            DW $53C0
+1468  8BDF C0 54            DW $54C0
+1469  8BE1 C0 55            DW $55C0
+1470  8BE3 C0 56            DW $56C0
+1471  8BE5 C0 57            DW $57C0
+1472  8BE7 E0 50            DW $50E0
+1473  8BE9 E0 51            DW $51E0
+1474  8BEB E0 52            DW $52E0
+1475  8BED E0 53            DW $53E0
+1476  8BEF E0 54            DW $54E0
+1477  8BF1 E0 55            DW $55E0
+1478  8BF3 E0 56            DW $56E0
+1479  8BF5 E0 57            DW $57E0
+1480  8BF7                  INCLUDE "font6s.inc"
+# file opened: font6s.inc
+   1+ 8BF7              ; font6s.inc — GENERATED by makefont6.py; [ci][shift][row] lo,hi 6px 5x7 shifted sheet
+   2+ 8BF7              FONT6S:
+   3+ 8BF7 70 00 88 00      DB $70, $00, $88, $00, $88, $00, $F8, $00
+   3+ 8BFB 88 00 F8 00
+   4+ 8BFF 88 00 88 00      DB $88, $00, $88, $00, $88, $00, $38, $00
+   4+ 8C03 88 00 38 00
+   5+ 8C07 44 00 44 00      DB $44, $00, $44, $00, $7C, $00, $44, $00
+   5+ 8C0B 7C 00 44 00
+   6+ 8C0F 44 00 44 00      DB $44, $00, $44, $00, $1C, $00, $22, $00
+   6+ 8C13 1C 00 22 00
+   7+ 8C17 22 00 3E 00      DB $22, $00, $3E, $00, $22, $00, $22, $00
+   7+ 8C1B 22 00 22 00
+   8+ 8C1F 22 00 0E 00      DB $22, $00, $0E, $00, $11, $00, $11, $00
+   8+ 8C23 11 00 11 00
+   9+ 8C27 1F 00 11 00      DB $1F, $00, $11, $00, $11, $00, $11, $00
+   9+ 8C2B 11 00 11 00
+  10+ 8C2F 07 00 08 80      DB $07, $00, $08, $80, $08, $80, $0F, $80
+  10+ 8C33 08 80 0F 80
+  11+ 8C37 08 80 08 80      DB $08, $80, $08, $80, $08, $80, $03, $80
+  11+ 8C3B 08 80 03 80
+  12+ 8C3F 04 40 04 40      DB $04, $40, $04, $40, $07, $C0, $04, $40
+  12+ 8C43 07 C0 04 40
+  13+ 8C47 04 40 04 40      DB $04, $40, $04, $40, $01, $C0, $02, $20
+  13+ 8C4B 01 C0 02 20
+  14+ 8C4F 02 20 03 E0      DB $02, $20, $03, $E0, $02, $20, $02, $20
+  14+ 8C53 02 20 02 20
+  15+ 8C57 02 20 00 E0      DB $02, $20, $00, $E0, $01, $10, $01, $10
+  15+ 8C5B 01 10 01 10
+  16+ 8C5F 01 F0 01 10      DB $01, $F0, $01, $10, $01, $10, $01, $10
+  16+ 8C63 01 10 01 10
+  17+ 8C67 F0 00 88 00      DB $F0, $00, $88, $00, $88, $00, $F0, $00
+  17+ 8C6B 88 00 F0 00
+  18+ 8C6F 88 00 88 00      DB $88, $00, $88, $00, $F0, $00, $78, $00
+  18+ 8C73 F0 00 78 00
+  19+ 8C77 44 00 44 00      DB $44, $00, $44, $00, $78, $00, $44, $00
+  19+ 8C7B 78 00 44 00
+  20+ 8C7F 44 00 78 00      DB $44, $00, $78, $00, $3C, $00, $22, $00
+  20+ 8C83 3C 00 22 00
+  21+ 8C87 22 00 3C 00      DB $22, $00, $3C, $00, $22, $00, $22, $00
+  21+ 8C8B 22 00 22 00
+  22+ 8C8F 3C 00 1E 00      DB $3C, $00, $1E, $00, $11, $00, $11, $00
+  22+ 8C93 11 00 11 00
+  23+ 8C97 1E 00 11 00      DB $1E, $00, $11, $00, $11, $00, $1E, $00
+  23+ 8C9B 11 00 1E 00
+  24+ 8C9F 0F 00 08 80      DB $0F, $00, $08, $80, $08, $80, $0F, $00
+  24+ 8CA3 08 80 0F 00
+  25+ 8CA7 08 80 08 80      DB $08, $80, $08, $80, $0F, $00, $07, $80
+  25+ 8CAB 0F 00 07 80
+  26+ 8CAF 04 40 04 40      DB $04, $40, $04, $40, $07, $80, $04, $40
+  26+ 8CB3 07 80 04 40
+  27+ 8CB7 04 40 07 80      DB $04, $40, $07, $80, $03, $C0, $02, $20
+  27+ 8CBB 03 C0 02 20
+  28+ 8CBF 02 20 03 C0      DB $02, $20, $03, $C0, $02, $20, $02, $20
+  28+ 8CC3 02 20 02 20
+  29+ 8CC7 03 C0 01 E0      DB $03, $C0, $01, $E0, $01, $10, $01, $10
+  29+ 8CCB 01 10 01 10
+  30+ 8CCF 01 E0 01 10      DB $01, $E0, $01, $10, $01, $10, $01, $E0
+  30+ 8CD3 01 10 01 E0
+  31+ 8CD7 70 00 88 00      DB $70, $00, $88, $00, $80, $00, $80, $00
+  31+ 8CDB 80 00 80 00
+  32+ 8CDF 80 00 88 00      DB $80, $00, $88, $00, $70, $00, $38, $00
+  32+ 8CE3 70 00 38 00
+  33+ 8CE7 44 00 40 00      DB $44, $00, $40, $00, $40, $00, $40, $00
+  33+ 8CEB 40 00 40 00
+  34+ 8CEF 44 00 38 00      DB $44, $00, $38, $00, $1C, $00, $22, $00
+  34+ 8CF3 1C 00 22 00
+  35+ 8CF7 20 00 20 00      DB $20, $00, $20, $00, $20, $00, $22, $00
+  35+ 8CFB 20 00 22 00
+  36+ 8CFF 1C 00 0E 00      DB $1C, $00, $0E, $00, $11, $00, $10, $00
+  36+ 8D03 11 00 10 00
+  37+ 8D07 10 00 10 00      DB $10, $00, $10, $00, $11, $00, $0E, $00
+  37+ 8D0B 11 00 0E 00
+  38+ 8D0F 07 00 08 80      DB $07, $00, $08, $80, $08, $00, $08, $00
+  38+ 8D13 08 00 08 00
+  39+ 8D17 08 00 08 80      DB $08, $00, $08, $80, $07, $00, $03, $80
+  39+ 8D1B 07 00 03 80
+  40+ 8D1F 04 40 04 00      DB $04, $40, $04, $00, $04, $00, $04, $00
+  40+ 8D23 04 00 04 00
+  41+ 8D27 04 40 03 80      DB $04, $40, $03, $80, $01, $C0, $02, $20
+  41+ 8D2B 01 C0 02 20
+  42+ 8D2F 02 00 02 00      DB $02, $00, $02, $00, $02, $00, $02, $20
+  42+ 8D33 02 00 02 20
+  43+ 8D37 01 C0 00 E0      DB $01, $C0, $00, $E0, $01, $10, $01, $00
+  43+ 8D3B 01 10 01 00
+  44+ 8D3F 01 00 01 00      DB $01, $00, $01, $00, $01, $10, $00, $E0
+  44+ 8D43 01 10 00 E0
+  45+ 8D47 F0 00 88 00      DB $F0, $00, $88, $00, $88, $00, $88, $00
+  45+ 8D4B 88 00 88 00
+  46+ 8D4F 88 00 88 00      DB $88, $00, $88, $00, $F0, $00, $78, $00
+  46+ 8D53 F0 00 78 00
+  47+ 8D57 44 00 44 00      DB $44, $00, $44, $00, $44, $00, $44, $00
+  47+ 8D5B 44 00 44 00
+  48+ 8D5F 44 00 78 00      DB $44, $00, $78, $00, $3C, $00, $22, $00
+  48+ 8D63 3C 00 22 00
+  49+ 8D67 22 00 22 00      DB $22, $00, $22, $00, $22, $00, $22, $00
+  49+ 8D6B 22 00 22 00
+  50+ 8D6F 3C 00 1E 00      DB $3C, $00, $1E, $00, $11, $00, $11, $00
+  50+ 8D73 11 00 11 00
+  51+ 8D77 11 00 11 00      DB $11, $00, $11, $00, $11, $00, $1E, $00
+  51+ 8D7B 11 00 1E 00
+  52+ 8D7F 0F 00 08 80      DB $0F, $00, $08, $80, $08, $80, $08, $80
+  52+ 8D83 08 80 08 80
+  53+ 8D87 08 80 08 80      DB $08, $80, $08, $80, $0F, $00, $07, $80
+  53+ 8D8B 0F 00 07 80
+  54+ 8D8F 04 40 04 40      DB $04, $40, $04, $40, $04, $40, $04, $40
+  54+ 8D93 04 40 04 40
+  55+ 8D97 04 40 07 80      DB $04, $40, $07, $80, $03, $C0, $02, $20
+  55+ 8D9B 03 C0 02 20
+  56+ 8D9F 02 20 02 20      DB $02, $20, $02, $20, $02, $20, $02, $20
+  56+ 8DA3 02 20 02 20
+  57+ 8DA7 03 C0 01 E0      DB $03, $C0, $01, $E0, $01, $10, $01, $10
+  57+ 8DAB 01 10 01 10
+  58+ 8DAF 01 10 01 10      DB $01, $10, $01, $10, $01, $10, $01, $E0
+  58+ 8DB3 01 10 01 E0
+  59+ 8DB7 F8 00 80 00      DB $F8, $00, $80, $00, $80, $00, $F0, $00
+  59+ 8DBB 80 00 F0 00
+  60+ 8DBF 80 00 80 00      DB $80, $00, $80, $00, $F8, $00, $7C, $00
+  60+ 8DC3 F8 00 7C 00
+  61+ 8DC7 40 00 40 00      DB $40, $00, $40, $00, $78, $00, $40, $00
+  61+ 8DCB 78 00 40 00
+  62+ 8DCF 40 00 7C 00      DB $40, $00, $7C, $00, $3E, $00, $20, $00
+  62+ 8DD3 3E 00 20 00
+  63+ 8DD7 20 00 3C 00      DB $20, $00, $3C, $00, $20, $00, $20, $00
+  63+ 8DDB 20 00 20 00
+  64+ 8DDF 3E 00 1F 00      DB $3E, $00, $1F, $00, $10, $00, $10, $00
+  64+ 8DE3 10 00 10 00
+  65+ 8DE7 1E 00 10 00      DB $1E, $00, $10, $00, $10, $00, $1F, $00
+  65+ 8DEB 10 00 1F 00
+  66+ 8DEF 0F 80 08 00      DB $0F, $80, $08, $00, $08, $00, $0F, $00
+  66+ 8DF3 08 00 0F 00
+  67+ 8DF7 08 00 08 00      DB $08, $00, $08, $00, $0F, $80, $07, $C0
+  67+ 8DFB 0F 80 07 C0
+  68+ 8DFF 04 00 04 00      DB $04, $00, $04, $00, $07, $80, $04, $00
+  68+ 8E03 07 80 04 00
+  69+ 8E07 04 00 07 C0      DB $04, $00, $07, $C0, $03, $E0, $02, $00
+  69+ 8E0B 03 E0 02 00
+  70+ 8E0F 02 00 03 C0      DB $02, $00, $03, $C0, $02, $00, $02, $00
+  70+ 8E13 02 00 02 00
+  71+ 8E17 03 E0 01 F0      DB $03, $E0, $01, $F0, $01, $00, $01, $00
+  71+ 8E1B 01 00 01 00
+  72+ 8E1F 01 E0 01 00      DB $01, $E0, $01, $00, $01, $00, $01, $F0
+  72+ 8E23 01 00 01 F0
+  73+ 8E27 F8 00 80 00      DB $F8, $00, $80, $00, $80, $00, $F0, $00
+  73+ 8E2B 80 00 F0 00
+  74+ 8E2F 80 00 80 00      DB $80, $00, $80, $00, $80, $00, $7C, $00
+  74+ 8E33 80 00 7C 00
+  75+ 8E37 40 00 40 00      DB $40, $00, $40, $00, $78, $00, $40, $00
+  75+ 8E3B 78 00 40 00
+  76+ 8E3F 40 00 40 00      DB $40, $00, $40, $00, $3E, $00, $20, $00
+  76+ 8E43 3E 00 20 00
+  77+ 8E47 20 00 3C 00      DB $20, $00, $3C, $00, $20, $00, $20, $00
+  77+ 8E4B 20 00 20 00
+  78+ 8E4F 20 00 1F 00      DB $20, $00, $1F, $00, $10, $00, $10, $00
+  78+ 8E53 10 00 10 00
+  79+ 8E57 1E 00 10 00      DB $1E, $00, $10, $00, $10, $00, $10, $00
+  79+ 8E5B 10 00 10 00
+  80+ 8E5F 0F 80 08 00      DB $0F, $80, $08, $00, $08, $00, $0F, $00
+  80+ 8E63 08 00 0F 00
+  81+ 8E67 08 00 08 00      DB $08, $00, $08, $00, $08, $00, $07, $C0
+  81+ 8E6B 08 00 07 C0
+  82+ 8E6F 04 00 04 00      DB $04, $00, $04, $00, $07, $80, $04, $00
+  82+ 8E73 07 80 04 00
+  83+ 8E77 04 00 04 00      DB $04, $00, $04, $00, $03, $E0, $02, $00
+  83+ 8E7B 03 E0 02 00
+  84+ 8E7F 02 00 03 C0      DB $02, $00, $03, $C0, $02, $00, $02, $00
+  84+ 8E83 02 00 02 00
+  85+ 8E87 02 00 01 F0      DB $02, $00, $01, $F0, $01, $00, $01, $00
+  85+ 8E8B 01 00 01 00
+  86+ 8E8F 01 E0 01 00      DB $01, $E0, $01, $00, $01, $00, $01, $00
+  86+ 8E93 01 00 01 00
+  87+ 8E97 70 00 88 00      DB $70, $00, $88, $00, $80, $00, $B8, $00
+  87+ 8E9B 80 00 B8 00
+  88+ 8E9F 88 00 88 00      DB $88, $00, $88, $00, $78, $00, $38, $00
+  88+ 8EA3 78 00 38 00
+  89+ 8EA7 44 00 40 00      DB $44, $00, $40, $00, $5C, $00, $44, $00
+  89+ 8EAB 5C 00 44 00
+  90+ 8EAF 44 00 3C 00      DB $44, $00, $3C, $00, $1C, $00, $22, $00
+  90+ 8EB3 1C 00 22 00
+  91+ 8EB7 20 00 2E 00      DB $20, $00, $2E, $00, $22, $00, $22, $00
+  91+ 8EBB 22 00 22 00
+  92+ 8EBF 1E 00 0E 00      DB $1E, $00, $0E, $00, $11, $00, $10, $00
+  92+ 8EC3 11 00 10 00
+  93+ 8EC7 17 00 11 00      DB $17, $00, $11, $00, $11, $00, $0F, $00
+  93+ 8ECB 11 00 0F 00
+  94+ 8ECF 07 00 08 80      DB $07, $00, $08, $80, $08, $00, $0B, $80
+  94+ 8ED3 08 00 0B 80
+  95+ 8ED7 08 80 08 80      DB $08, $80, $08, $80, $07, $80, $03, $80
+  95+ 8EDB 07 80 03 80
+  96+ 8EDF 04 40 04 00      DB $04, $40, $04, $00, $05, $C0, $04, $40
+  96+ 8EE3 05 C0 04 40
+  97+ 8EE7 04 40 03 C0      DB $04, $40, $03, $C0, $01, $C0, $02, $20
+  97+ 8EEB 01 C0 02 20
+  98+ 8EEF 02 00 02 E0      DB $02, $00, $02, $E0, $02, $20, $02, $20
+  98+ 8EF3 02 20 02 20
+  99+ 8EF7 01 E0 00 E0      DB $01, $E0, $00, $E0, $01, $10, $01, $00
+  99+ 8EFB 01 10 01 00
+ 100+ 8EFF 01 70 01 10      DB $01, $70, $01, $10, $01, $10, $00, $F0
+ 100+ 8F03 01 10 00 F0
+ 101+ 8F07 88 00 88 00      DB $88, $00, $88, $00, $88, $00, $F8, $00
+ 101+ 8F0B 88 00 F8 00
+ 102+ 8F0F 88 00 88 00      DB $88, $00, $88, $00, $88, $00, $44, $00
+ 102+ 8F13 88 00 44 00
+ 103+ 8F17 44 00 44 00      DB $44, $00, $44, $00, $7C, $00, $44, $00
+ 103+ 8F1B 7C 00 44 00
+ 104+ 8F1F 44 00 44 00      DB $44, $00, $44, $00, $22, $00, $22, $00
+ 104+ 8F23 22 00 22 00
+ 105+ 8F27 22 00 3E 00      DB $22, $00, $3E, $00, $22, $00, $22, $00
+ 105+ 8F2B 22 00 22 00
+ 106+ 8F2F 22 00 11 00      DB $22, $00, $11, $00, $11, $00, $11, $00
+ 106+ 8F33 11 00 11 00
+ 107+ 8F37 1F 00 11 00      DB $1F, $00, $11, $00, $11, $00, $11, $00
+ 107+ 8F3B 11 00 11 00
+ 108+ 8F3F 08 80 08 80      DB $08, $80, $08, $80, $08, $80, $0F, $80
+ 108+ 8F43 08 80 0F 80
+ 109+ 8F47 08 80 08 80      DB $08, $80, $08, $80, $08, $80, $04, $40
+ 109+ 8F4B 08 80 04 40
+ 110+ 8F4F 04 40 04 40      DB $04, $40, $04, $40, $07, $C0, $04, $40
+ 110+ 8F53 07 C0 04 40
+ 111+ 8F57 04 40 04 40      DB $04, $40, $04, $40, $02, $20, $02, $20
+ 111+ 8F5B 02 20 02 20
+ 112+ 8F5F 02 20 03 E0      DB $02, $20, $03, $E0, $02, $20, $02, $20
+ 112+ 8F63 02 20 02 20
+ 113+ 8F67 02 20 01 10      DB $02, $20, $01, $10, $01, $10, $01, $10
+ 113+ 8F6B 01 10 01 10
+ 114+ 8F6F 01 F0 01 10      DB $01, $F0, $01, $10, $01, $10, $01, $10
+ 114+ 8F73 01 10 01 10
+ 115+ 8F77 38 00 10 00      DB $38, $00, $10, $00, $10, $00, $10, $00
+ 115+ 8F7B 10 00 10 00
+ 116+ 8F7F 10 00 10 00      DB $10, $00, $10, $00, $38, $00, $1C, $00
+ 116+ 8F83 38 00 1C 00
+ 117+ 8F87 08 00 08 00      DB $08, $00, $08, $00, $08, $00, $08, $00
+ 117+ 8F8B 08 00 08 00
+ 118+ 8F8F 08 00 1C 00      DB $08, $00, $1C, $00, $0E, $00, $04, $00
+ 118+ 8F93 0E 00 04 00
+ 119+ 8F97 04 00 04 00      DB $04, $00, $04, $00, $04, $00, $04, $00
+ 119+ 8F9B 04 00 04 00
+ 120+ 8F9F 0E 00 07 00      DB $0E, $00, $07, $00, $02, $00, $02, $00
+ 120+ 8FA3 02 00 02 00
+ 121+ 8FA7 02 00 02 00      DB $02, $00, $02, $00, $02, $00, $07, $00
+ 121+ 8FAB 02 00 07 00
+ 122+ 8FAF 03 80 01 00      DB $03, $80, $01, $00, $01, $00, $01, $00
+ 122+ 8FB3 01 00 01 00
+ 123+ 8FB7 01 00 01 00      DB $01, $00, $01, $00, $03, $80, $01, $C0
+ 123+ 8FBB 03 80 01 C0
+ 124+ 8FBF 00 80 00 80      DB $00, $80, $00, $80, $00, $80, $00, $80
+ 124+ 8FC3 00 80 00 80
+ 125+ 8FC7 00 80 01 C0      DB $00, $80, $01, $C0, $00, $E0, $00, $40
+ 125+ 8FCB 00 E0 00 40
+ 126+ 8FCF 00 40 00 40      DB $00, $40, $00, $40, $00, $40, $00, $40
+ 126+ 8FD3 00 40 00 40
+ 127+ 8FD7 00 E0 00 70      DB $00, $E0, $00, $70, $00, $20, $00, $20
+ 127+ 8FDB 00 20 00 20
+ 128+ 8FDF 00 20 00 20      DB $00, $20, $00, $20, $00, $20, $00, $70
+ 128+ 8FE3 00 20 00 70
+ 129+ 8FE7 38 00 10 00      DB $38, $00, $10, $00, $10, $00, $10, $00
+ 129+ 8FEB 10 00 10 00
+ 130+ 8FEF 10 00 90 00      DB $10, $00, $90, $00, $60, $00, $1C, $00
+ 130+ 8FF3 60 00 1C 00
+ 131+ 8FF7 08 00 08 00      DB $08, $00, $08, $00, $08, $00, $08, $00
+ 131+ 8FFB 08 00 08 00
+ 132+ 8FFF 48 00 30 00      DB $48, $00, $30, $00, $0E, $00, $04, $00
+ 132+ 9003 0E 00 04 00
+ 133+ 9007 04 00 04 00      DB $04, $00, $04, $00, $04, $00, $24, $00
+ 133+ 900B 04 00 24 00
+ 134+ 900F 18 00 07 00      DB $18, $00, $07, $00, $02, $00, $02, $00
+ 134+ 9013 02 00 02 00
+ 135+ 9017 02 00 02 00      DB $02, $00, $02, $00, $12, $00, $0C, $00
+ 135+ 901B 12 00 0C 00
+ 136+ 901F 03 80 01 00      DB $03, $80, $01, $00, $01, $00, $01, $00
+ 136+ 9023 01 00 01 00
+ 137+ 9027 01 00 09 00      DB $01, $00, $09, $00, $06, $00, $01, $C0
+ 137+ 902B 06 00 01 C0
+ 138+ 902F 00 80 00 80      DB $00, $80, $00, $80, $00, $80, $00, $80
+ 138+ 9033 00 80 00 80
+ 139+ 9037 04 80 03 00      DB $04, $80, $03, $00, $00, $E0, $00, $40
+ 139+ 903B 00 E0 00 40
+ 140+ 903F 00 40 00 40      DB $00, $40, $00, $40, $00, $40, $02, $40
+ 140+ 9043 00 40 02 40
+ 141+ 9047 01 80 00 70      DB $01, $80, $00, $70, $00, $20, $00, $20
+ 141+ 904B 00 20 00 20
+ 142+ 904F 00 20 00 20      DB $00, $20, $00, $20, $01, $20, $00, $C0
+ 142+ 9053 01 20 00 C0
+ 143+ 9057 88 00 90 00      DB $88, $00, $90, $00, $A0, $00, $C0, $00
+ 143+ 905B A0 00 C0 00
+ 144+ 905F A0 00 90 00      DB $A0, $00, $90, $00, $88, $00, $44, $00
+ 144+ 9063 88 00 44 00
+ 145+ 9067 48 00 50 00      DB $48, $00, $50, $00, $60, $00, $50, $00
+ 145+ 906B 60 00 50 00
+ 146+ 906F 48 00 44 00      DB $48, $00, $44, $00, $22, $00, $24, $00
+ 146+ 9073 22 00 24 00
+ 147+ 9077 28 00 30 00      DB $28, $00, $30, $00, $28, $00, $24, $00
+ 147+ 907B 28 00 24 00
+ 148+ 907F 22 00 11 00      DB $22, $00, $11, $00, $12, $00, $14, $00
+ 148+ 9083 12 00 14 00
+ 149+ 9087 18 00 14 00      DB $18, $00, $14, $00, $12, $00, $11, $00
+ 149+ 908B 12 00 11 00
+ 150+ 908F 08 80 09 00      DB $08, $80, $09, $00, $0A, $00, $0C, $00
+ 150+ 9093 0A 00 0C 00
+ 151+ 9097 0A 00 09 00      DB $0A, $00, $09, $00, $08, $80, $04, $40
+ 151+ 909B 08 80 04 40
+ 152+ 909F 04 80 05 00      DB $04, $80, $05, $00, $06, $00, $05, $00
+ 152+ 90A3 06 00 05 00
+ 153+ 90A7 04 80 04 40      DB $04, $80, $04, $40, $02, $20, $02, $40
+ 153+ 90AB 02 20 02 40
+ 154+ 90AF 02 80 03 00      DB $02, $80, $03, $00, $02, $80, $02, $40
+ 154+ 90B3 02 80 02 40
+ 155+ 90B7 02 20 01 10      DB $02, $20, $01, $10, $01, $20, $01, $40
+ 155+ 90BB 01 20 01 40
+ 156+ 90BF 01 80 01 40      DB $01, $80, $01, $40, $01, $20, $01, $10
+ 156+ 90C3 01 20 01 10
+ 157+ 90C7 80 00 80 00      DB $80, $00, $80, $00, $80, $00, $80, $00
+ 157+ 90CB 80 00 80 00
+ 158+ 90CF 80 00 80 00      DB $80, $00, $80, $00, $F8, $00, $40, $00
+ 158+ 90D3 F8 00 40 00
+ 159+ 90D7 40 00 40 00      DB $40, $00, $40, $00, $40, $00, $40, $00
+ 159+ 90DB 40 00 40 00
+ 160+ 90DF 40 00 7C 00      DB $40, $00, $7C, $00, $20, $00, $20, $00
+ 160+ 90E3 20 00 20 00
+ 161+ 90E7 20 00 20 00      DB $20, $00, $20, $00, $20, $00, $20, $00
+ 161+ 90EB 20 00 20 00
+ 162+ 90EF 3E 00 10 00      DB $3E, $00, $10, $00, $10, $00, $10, $00
+ 162+ 90F3 10 00 10 00
+ 163+ 90F7 10 00 10 00      DB $10, $00, $10, $00, $10, $00, $1F, $00
+ 163+ 90FB 10 00 1F 00
+ 164+ 90FF 08 00 08 00      DB $08, $00, $08, $00, $08, $00, $08, $00
+ 164+ 9103 08 00 08 00
+ 165+ 9107 08 00 08 00      DB $08, $00, $08, $00, $0F, $80, $04, $00
+ 165+ 910B 0F 80 04 00
+ 166+ 910F 04 00 04 00      DB $04, $00, $04, $00, $04, $00, $04, $00
+ 166+ 9113 04 00 04 00
+ 167+ 9117 04 00 07 C0      DB $04, $00, $07, $C0, $02, $00, $02, $00
+ 167+ 911B 02 00 02 00
+ 168+ 911F 02 00 02 00      DB $02, $00, $02, $00, $02, $00, $02, $00
+ 168+ 9123 02 00 02 00
+ 169+ 9127 03 E0 01 00      DB $03, $E0, $01, $00, $01, $00, $01, $00
+ 169+ 912B 01 00 01 00
+ 170+ 912F 01 00 01 00      DB $01, $00, $01, $00, $01, $00, $01, $F0
+ 170+ 9133 01 00 01 F0
+ 171+ 9137 88 00 D8 00      DB $88, $00, $D8, $00, $A8, $00, $A8, $00
+ 171+ 913B A8 00 A8 00
+ 172+ 913F 88 00 88 00      DB $88, $00, $88, $00, $88, $00, $44, $00
+ 172+ 9143 88 00 44 00
+ 173+ 9147 6C 00 54 00      DB $6C, $00, $54, $00, $54, $00, $44, $00
+ 173+ 914B 54 00 44 00
+ 174+ 914F 44 00 44 00      DB $44, $00, $44, $00, $22, $00, $36, $00
+ 174+ 9153 22 00 36 00
+ 175+ 9157 2A 00 2A 00      DB $2A, $00, $2A, $00, $22, $00, $22, $00
+ 175+ 915B 22 00 22 00
+ 176+ 915F 22 00 11 00      DB $22, $00, $11, $00, $1B, $00, $15, $00
+ 176+ 9163 1B 00 15 00
+ 177+ 9167 15 00 11 00      DB $15, $00, $11, $00, $11, $00, $11, $00
+ 177+ 916B 11 00 11 00
+ 178+ 916F 08 80 0D 80      DB $08, $80, $0D, $80, $0A, $80, $0A, $80
+ 178+ 9173 0A 80 0A 80
+ 179+ 9177 08 80 08 80      DB $08, $80, $08, $80, $08, $80, $04, $40
+ 179+ 917B 08 80 04 40
+ 180+ 917F 06 C0 05 40      DB $06, $C0, $05, $40, $05, $40, $04, $40
+ 180+ 9183 05 40 04 40
+ 181+ 9187 04 40 04 40      DB $04, $40, $04, $40, $02, $20, $03, $60
+ 181+ 918B 02 20 03 60
+ 182+ 918F 02 A0 02 A0      DB $02, $A0, $02, $A0, $02, $20, $02, $20
+ 182+ 9193 02 20 02 20
+ 183+ 9197 02 20 01 10      DB $02, $20, $01, $10, $01, $B0, $01, $50
+ 183+ 919B 01 B0 01 50
+ 184+ 919F 01 50 01 10      DB $01, $50, $01, $10, $01, $10, $01, $10
+ 184+ 91A3 01 10 01 10
+ 185+ 91A7 88 00 C8 00      DB $88, $00, $C8, $00, $A8, $00, $98, $00
+ 185+ 91AB A8 00 98 00
+ 186+ 91AF 88 00 88 00      DB $88, $00, $88, $00, $88, $00, $44, $00
+ 186+ 91B3 88 00 44 00
+ 187+ 91B7 64 00 54 00      DB $64, $00, $54, $00, $4C, $00, $44, $00
+ 187+ 91BB 4C 00 44 00
+ 188+ 91BF 44 00 44 00      DB $44, $00, $44, $00, $22, $00, $32, $00
+ 188+ 91C3 22 00 32 00
+ 189+ 91C7 2A 00 26 00      DB $2A, $00, $26, $00, $22, $00, $22, $00
+ 189+ 91CB 22 00 22 00
+ 190+ 91CF 22 00 11 00      DB $22, $00, $11, $00, $19, $00, $15, $00
+ 190+ 91D3 19 00 15 00
+ 191+ 91D7 13 00 11 00      DB $13, $00, $11, $00, $11, $00, $11, $00
+ 191+ 91DB 11 00 11 00
+ 192+ 91DF 08 80 0C 80      DB $08, $80, $0C, $80, $0A, $80, $09, $80
+ 192+ 91E3 0A 80 09 80
+ 193+ 91E7 08 80 08 80      DB $08, $80, $08, $80, $08, $80, $04, $40
+ 193+ 91EB 08 80 04 40
+ 194+ 91EF 06 40 05 40      DB $06, $40, $05, $40, $04, $C0, $04, $40
+ 194+ 91F3 04 C0 04 40
+ 195+ 91F7 04 40 04 40      DB $04, $40, $04, $40, $02, $20, $03, $20
+ 195+ 91FB 02 20 03 20
+ 196+ 91FF 02 A0 02 60      DB $02, $A0, $02, $60, $02, $20, $02, $20
+ 196+ 9203 02 20 02 20
+ 197+ 9207 02 20 01 10      DB $02, $20, $01, $10, $01, $90, $01, $50
+ 197+ 920B 01 90 01 50
+ 198+ 920F 01 30 01 10      DB $01, $30, $01, $10, $01, $10, $01, $10
+ 198+ 9213 01 10 01 10
+ 199+ 9217 70 00 88 00      DB $70, $00, $88, $00, $88, $00, $88, $00
+ 199+ 921B 88 00 88 00
+ 200+ 921F 88 00 88 00      DB $88, $00, $88, $00, $70, $00, $38, $00
+ 200+ 9223 70 00 38 00
+ 201+ 9227 44 00 44 00      DB $44, $00, $44, $00, $44, $00, $44, $00
+ 201+ 922B 44 00 44 00
+ 202+ 922F 44 00 38 00      DB $44, $00, $38, $00, $1C, $00, $22, $00
+ 202+ 9233 1C 00 22 00
+ 203+ 9237 22 00 22 00      DB $22, $00, $22, $00, $22, $00, $22, $00
+ 203+ 923B 22 00 22 00
+ 204+ 923F 1C 00 0E 00      DB $1C, $00, $0E, $00, $11, $00, $11, $00
+ 204+ 9243 11 00 11 00
+ 205+ 9247 11 00 11 00      DB $11, $00, $11, $00, $11, $00, $0E, $00
+ 205+ 924B 11 00 0E 00
+ 206+ 924F 07 00 08 80      DB $07, $00, $08, $80, $08, $80, $08, $80
+ 206+ 9253 08 80 08 80
+ 207+ 9257 08 80 08 80      DB $08, $80, $08, $80, $07, $00, $03, $80
+ 207+ 925B 07 00 03 80
+ 208+ 925F 04 40 04 40      DB $04, $40, $04, $40, $04, $40, $04, $40
+ 208+ 9263 04 40 04 40
+ 209+ 9267 04 40 03 80      DB $04, $40, $03, $80, $01, $C0, $02, $20
+ 209+ 926B 01 C0 02 20
+ 210+ 926F 02 20 02 20      DB $02, $20, $02, $20, $02, $20, $02, $20
+ 210+ 9273 02 20 02 20
+ 211+ 9277 01 C0 00 E0      DB $01, $C0, $00, $E0, $01, $10, $01, $10
+ 211+ 927B 01 10 01 10
+ 212+ 927F 01 10 01 10      DB $01, $10, $01, $10, $01, $10, $00, $E0
+ 212+ 9283 01 10 00 E0
+ 213+ 9287 F0 00 88 00      DB $F0, $00, $88, $00, $88, $00, $F0, $00
+ 213+ 928B 88 00 F0 00
+ 214+ 928F 80 00 80 00      DB $80, $00, $80, $00, $80, $00, $78, $00
+ 214+ 9293 80 00 78 00
+ 215+ 9297 44 00 44 00      DB $44, $00, $44, $00, $78, $00, $40, $00
+ 215+ 929B 78 00 40 00
+ 216+ 929F 40 00 40 00      DB $40, $00, $40, $00, $3C, $00, $22, $00
+ 216+ 92A3 3C 00 22 00
+ 217+ 92A7 22 00 3C 00      DB $22, $00, $3C, $00, $20, $00, $20, $00
+ 217+ 92AB 20 00 20 00
+ 218+ 92AF 20 00 1E 00      DB $20, $00, $1E, $00, $11, $00, $11, $00
+ 218+ 92B3 11 00 11 00
+ 219+ 92B7 1E 00 10 00      DB $1E, $00, $10, $00, $10, $00, $10, $00
+ 219+ 92BB 10 00 10 00
+ 220+ 92BF 0F 00 08 80      DB $0F, $00, $08, $80, $08, $80, $0F, $00
+ 220+ 92C3 08 80 0F 00
+ 221+ 92C7 08 00 08 00      DB $08, $00, $08, $00, $08, $00, $07, $80
+ 221+ 92CB 08 00 07 80
+ 222+ 92CF 04 40 04 40      DB $04, $40, $04, $40, $07, $80, $04, $00
+ 222+ 92D3 07 80 04 00
+ 223+ 92D7 04 00 04 00      DB $04, $00, $04, $00, $03, $C0, $02, $20
+ 223+ 92DB 03 C0 02 20
+ 224+ 92DF 02 20 03 C0      DB $02, $20, $03, $C0, $02, $00, $02, $00
+ 224+ 92E3 02 00 02 00
+ 225+ 92E7 02 00 01 E0      DB $02, $00, $01, $E0, $01, $10, $01, $10
+ 225+ 92EB 01 10 01 10
+ 226+ 92EF 01 E0 01 00      DB $01, $E0, $01, $00, $01, $00, $01, $00
+ 226+ 92F3 01 00 01 00
+ 227+ 92F7 70 00 88 00      DB $70, $00, $88, $00, $88, $00, $88, $00
+ 227+ 92FB 88 00 88 00
+ 228+ 92FF A8 00 90 00      DB $A8, $00, $90, $00, $68, $00, $38, $00
+ 228+ 9303 68 00 38 00
+ 229+ 9307 44 00 44 00      DB $44, $00, $44, $00, $44, $00, $54, $00
+ 229+ 930B 44 00 54 00
+ 230+ 930F 48 00 34 00      DB $48, $00, $34, $00, $1C, $00, $22, $00
+ 230+ 9313 1C 00 22 00
+ 231+ 9317 22 00 22 00      DB $22, $00, $22, $00, $2A, $00, $24, $00
+ 231+ 931B 2A 00 24 00
+ 232+ 931F 1A 00 0E 00      DB $1A, $00, $0E, $00, $11, $00, $11, $00
+ 232+ 9323 11 00 11 00
+ 233+ 9327 11 00 15 00      DB $11, $00, $15, $00, $12, $00, $0D, $00
+ 233+ 932B 12 00 0D 00
+ 234+ 932F 07 00 08 80      DB $07, $00, $08, $80, $08, $80, $08, $80
+ 234+ 9333 08 80 08 80
+ 235+ 9337 0A 80 09 00      DB $0A, $80, $09, $00, $06, $80, $03, $80
+ 235+ 933B 06 80 03 80
+ 236+ 933F 04 40 04 40      DB $04, $40, $04, $40, $04, $40, $05, $40
+ 236+ 9343 04 40 05 40
+ 237+ 9347 04 80 03 40      DB $04, $80, $03, $40, $01, $C0, $02, $20
+ 237+ 934B 01 C0 02 20
+ 238+ 934F 02 20 02 20      DB $02, $20, $02, $20, $02, $A0, $02, $40
+ 238+ 9353 02 A0 02 40
+ 239+ 9357 01 A0 00 E0      DB $01, $A0, $00, $E0, $01, $10, $01, $10
+ 239+ 935B 01 10 01 10
+ 240+ 935F 01 10 01 50      DB $01, $10, $01, $50, $01, $20, $00, $D0
+ 240+ 9363 01 20 00 D0
+ 241+ 9367 F0 00 88 00      DB $F0, $00, $88, $00, $88, $00, $F0, $00
+ 241+ 936B 88 00 F0 00
+ 242+ 936F A0 00 90 00      DB $A0, $00, $90, $00, $88, $00, $78, $00
+ 242+ 9373 88 00 78 00
+ 243+ 9377 44 00 44 00      DB $44, $00, $44, $00, $78, $00, $50, $00
+ 243+ 937B 78 00 50 00
+ 244+ 937F 48 00 44 00      DB $48, $00, $44, $00, $3C, $00, $22, $00
+ 244+ 9383 3C 00 22 00
+ 245+ 9387 22 00 3C 00      DB $22, $00, $3C, $00, $28, $00, $24, $00
+ 245+ 938B 28 00 24 00
+ 246+ 938F 22 00 1E 00      DB $22, $00, $1E, $00, $11, $00, $11, $00
+ 246+ 9393 11 00 11 00
+ 247+ 9397 1E 00 14 00      DB $1E, $00, $14, $00, $12, $00, $11, $00
+ 247+ 939B 12 00 11 00
+ 248+ 939F 0F 00 08 80      DB $0F, $00, $08, $80, $08, $80, $0F, $00
+ 248+ 93A3 08 80 0F 00
+ 249+ 93A7 0A 00 09 00      DB $0A, $00, $09, $00, $08, $80, $07, $80
+ 249+ 93AB 08 80 07 80
+ 250+ 93AF 04 40 04 40      DB $04, $40, $04, $40, $07, $80, $05, $00
+ 250+ 93B3 07 80 05 00
+ 251+ 93B7 04 80 04 40      DB $04, $80, $04, $40, $03, $C0, $02, $20
+ 251+ 93BB 03 C0 02 20
+ 252+ 93BF 02 20 03 C0      DB $02, $20, $03, $C0, $02, $80, $02, $40
+ 252+ 93C3 02 80 02 40
+ 253+ 93C7 02 20 01 E0      DB $02, $20, $01, $E0, $01, $10, $01, $10
+ 253+ 93CB 01 10 01 10
+ 254+ 93CF 01 E0 01 40      DB $01, $E0, $01, $40, $01, $20, $01, $10
+ 254+ 93D3 01 20 01 10
+ 255+ 93D7 78 00 80 00      DB $78, $00, $80, $00, $80, $00, $70, $00
+ 255+ 93DB 80 00 70 00
+ 256+ 93DF 08 00 08 00      DB $08, $00, $08, $00, $F0, $00, $3C, $00
+ 256+ 93E3 F0 00 3C 00
+ 257+ 93E7 40 00 40 00      DB $40, $00, $40, $00, $38, $00, $04, $00
+ 257+ 93EB 38 00 04 00
+ 258+ 93EF 04 00 78 00      DB $04, $00, $78, $00, $1E, $00, $20, $00
+ 258+ 93F3 1E 00 20 00
+ 259+ 93F7 20 00 1C 00      DB $20, $00, $1C, $00, $02, $00, $02, $00
+ 259+ 93FB 02 00 02 00
+ 260+ 93FF 3C 00 0F 00      DB $3C, $00, $0F, $00, $10, $00, $10, $00
+ 260+ 9403 10 00 10 00
+ 261+ 9407 0E 00 01 00      DB $0E, $00, $01, $00, $01, $00, $1E, $00
+ 261+ 940B 01 00 1E 00
+ 262+ 940F 07 80 08 00      DB $07, $80, $08, $00, $08, $00, $07, $00
+ 262+ 9413 08 00 07 00
+ 263+ 9417 00 80 00 80      DB $00, $80, $00, $80, $0F, $00, $03, $C0
+ 263+ 941B 0F 00 03 C0
+ 264+ 941F 04 00 04 00      DB $04, $00, $04, $00, $03, $80, $00, $40
+ 264+ 9423 03 80 00 40
+ 265+ 9427 00 40 07 80      DB $00, $40, $07, $80, $01, $E0, $02, $00
+ 265+ 942B 01 E0 02 00
+ 266+ 942F 02 00 01 C0      DB $02, $00, $01, $C0, $00, $20, $00, $20
+ 266+ 9433 00 20 00 20
+ 267+ 9437 03 C0 00 F0      DB $03, $C0, $00, $F0, $01, $00, $01, $00
+ 267+ 943B 01 00 01 00
+ 268+ 943F 00 E0 00 10      DB $00, $E0, $00, $10, $00, $10, $01, $E0
+ 268+ 9443 00 10 01 E0
+ 269+ 9447 F8 00 20 00      DB $F8, $00, $20, $00, $20, $00, $20, $00
+ 269+ 944B 20 00 20 00
+ 270+ 944F 20 00 20 00      DB $20, $00, $20, $00, $20, $00, $7C, $00
+ 270+ 9453 20 00 7C 00
+ 271+ 9457 10 00 10 00      DB $10, $00, $10, $00, $10, $00, $10, $00
+ 271+ 945B 10 00 10 00
+ 272+ 945F 10 00 10 00      DB $10, $00, $10, $00, $3E, $00, $08, $00
+ 272+ 9463 3E 00 08 00
+ 273+ 9467 08 00 08 00      DB $08, $00, $08, $00, $08, $00, $08, $00
+ 273+ 946B 08 00 08 00
+ 274+ 946F 08 00 1F 00      DB $08, $00, $1F, $00, $04, $00, $04, $00
+ 274+ 9473 04 00 04 00
+ 275+ 9477 04 00 04 00      DB $04, $00, $04, $00, $04, $00, $04, $00
+ 275+ 947B 04 00 04 00
+ 276+ 947F 0F 80 02 00      DB $0F, $80, $02, $00, $02, $00, $02, $00
+ 276+ 9483 02 00 02 00
+ 277+ 9487 02 00 02 00      DB $02, $00, $02, $00, $02, $00, $07, $C0
+ 277+ 948B 02 00 07 C0
+ 278+ 948F 01 00 01 00      DB $01, $00, $01, $00, $01, $00, $01, $00
+ 278+ 9493 01 00 01 00
+ 279+ 9497 01 00 01 00      DB $01, $00, $01, $00, $03, $E0, $00, $80
+ 279+ 949B 03 E0 00 80
+ 280+ 949F 00 80 00 80      DB $00, $80, $00, $80, $00, $80, $00, $80
+ 280+ 94A3 00 80 00 80
+ 281+ 94A7 00 80 01 F0      DB $00, $80, $01, $F0, $00, $40, $00, $40
+ 281+ 94AB 00 40 00 40
+ 282+ 94AF 00 40 00 40      DB $00, $40, $00, $40, $00, $40, $00, $40
+ 282+ 94B3 00 40 00 40
+ 283+ 94B7 88 00 88 00      DB $88, $00, $88, $00, $88, $00, $88, $00
+ 283+ 94BB 88 00 88 00
+ 284+ 94BF 88 00 88 00      DB $88, $00, $88, $00, $70, $00, $44, $00
+ 284+ 94C3 70 00 44 00
+ 285+ 94C7 44 00 44 00      DB $44, $00, $44, $00, $44, $00, $44, $00
+ 285+ 94CB 44 00 44 00
+ 286+ 94CF 44 00 38 00      DB $44, $00, $38, $00, $22, $00, $22, $00
+ 286+ 94D3 22 00 22 00
+ 287+ 94D7 22 00 22 00      DB $22, $00, $22, $00, $22, $00, $22, $00
+ 287+ 94DB 22 00 22 00
+ 288+ 94DF 1C 00 11 00      DB $1C, $00, $11, $00, $11, $00, $11, $00
+ 288+ 94E3 11 00 11 00
+ 289+ 94E7 11 00 11 00      DB $11, $00, $11, $00, $11, $00, $0E, $00
+ 289+ 94EB 11 00 0E 00
+ 290+ 94EF 08 80 08 80      DB $08, $80, $08, $80, $08, $80, $08, $80
+ 290+ 94F3 08 80 08 80
+ 291+ 94F7 08 80 08 80      DB $08, $80, $08, $80, $07, $00, $04, $40
+ 291+ 94FB 07 00 04 40
+ 292+ 94FF 04 40 04 40      DB $04, $40, $04, $40, $04, $40, $04, $40
+ 292+ 9503 04 40 04 40
+ 293+ 9507 04 40 03 80      DB $04, $40, $03, $80, $02, $20, $02, $20
+ 293+ 950B 02 20 02 20
+ 294+ 950F 02 20 02 20      DB $02, $20, $02, $20, $02, $20, $02, $20
+ 294+ 9513 02 20 02 20
+ 295+ 9517 01 C0 01 10      DB $01, $C0, $01, $10, $01, $10, $01, $10
+ 295+ 951B 01 10 01 10
+ 296+ 951F 01 10 01 10      DB $01, $10, $01, $10, $01, $10, $00, $E0
+ 296+ 9523 01 10 00 E0
+ 297+ 9527 88 00 88 00      DB $88, $00, $88, $00, $88, $00, $88, $00
+ 297+ 952B 88 00 88 00
+ 298+ 952F 88 00 50 00      DB $88, $00, $50, $00, $20, $00, $44, $00
+ 298+ 9533 20 00 44 00
+ 299+ 9537 44 00 44 00      DB $44, $00, $44, $00, $44, $00, $44, $00
+ 299+ 953B 44 00 44 00
+ 300+ 953F 28 00 10 00      DB $28, $00, $10, $00, $22, $00, $22, $00
+ 300+ 9543 22 00 22 00
+ 301+ 9547 22 00 22 00      DB $22, $00, $22, $00, $22, $00, $14, $00
+ 301+ 954B 22 00 14 00
+ 302+ 954F 08 00 11 00      DB $08, $00, $11, $00, $11, $00, $11, $00
+ 302+ 9553 11 00 11 00
+ 303+ 9557 11 00 11 00      DB $11, $00, $11, $00, $0A, $00, $04, $00
+ 303+ 955B 0A 00 04 00
+ 304+ 955F 08 80 08 80      DB $08, $80, $08, $80, $08, $80, $08, $80
+ 304+ 9563 08 80 08 80
+ 305+ 9567 08 80 05 00      DB $08, $80, $05, $00, $02, $00, $04, $40
+ 305+ 956B 02 00 04 40
+ 306+ 956F 04 40 04 40      DB $04, $40, $04, $40, $04, $40, $04, $40
+ 306+ 9573 04 40 04 40
+ 307+ 9577 02 80 01 00      DB $02, $80, $01, $00, $02, $20, $02, $20
+ 307+ 957B 02 20 02 20
+ 308+ 957F 02 20 02 20      DB $02, $20, $02, $20, $02, $20, $01, $40
+ 308+ 9583 02 20 01 40
+ 309+ 9587 00 80 01 10      DB $00, $80, $01, $10, $01, $10, $01, $10
+ 309+ 958B 01 10 01 10
+ 310+ 958F 01 10 01 10      DB $01, $10, $01, $10, $00, $A0, $00, $40
+ 310+ 9593 00 A0 00 40
+ 311+ 9597 88 00 88 00      DB $88, $00, $88, $00, $88, $00, $A8, $00
+ 311+ 959B 88 00 A8 00
+ 312+ 959F A8 00 D8 00      DB $A8, $00, $D8, $00, $88, $00, $44, $00
+ 312+ 95A3 88 00 44 00
+ 313+ 95A7 44 00 44 00      DB $44, $00, $44, $00, $54, $00, $54, $00
+ 313+ 95AB 54 00 54 00
+ 314+ 95AF 6C 00 44 00      DB $6C, $00, $44, $00, $22, $00, $22, $00
+ 314+ 95B3 22 00 22 00
+ 315+ 95B7 22 00 2A 00      DB $22, $00, $2A, $00, $2A, $00, $36, $00
+ 315+ 95BB 2A 00 36 00
+ 316+ 95BF 22 00 11 00      DB $22, $00, $11, $00, $11, $00, $11, $00
+ 316+ 95C3 11 00 11 00
+ 317+ 95C7 15 00 15 00      DB $15, $00, $15, $00, $1B, $00, $11, $00
+ 317+ 95CB 1B 00 11 00
+ 318+ 95CF 08 80 08 80      DB $08, $80, $08, $80, $08, $80, $0A, $80
+ 318+ 95D3 08 80 0A 80
+ 319+ 95D7 0A 80 0D 80      DB $0A, $80, $0D, $80, $08, $80, $04, $40
+ 319+ 95DB 08 80 04 40
+ 320+ 95DF 04 40 04 40      DB $04, $40, $04, $40, $05, $40, $05, $40
+ 320+ 95E3 05 40 05 40
+ 321+ 95E7 06 C0 04 40      DB $06, $C0, $04, $40, $02, $20, $02, $20
+ 321+ 95EB 02 20 02 20
+ 322+ 95EF 02 20 02 A0      DB $02, $20, $02, $A0, $02, $A0, $03, $60
+ 322+ 95F3 02 A0 03 60
+ 323+ 95F7 02 20 01 10      DB $02, $20, $01, $10, $01, $10, $01, $10
+ 323+ 95FB 01 10 01 10
+ 324+ 95FF 01 50 01 50      DB $01, $50, $01, $50, $01, $B0, $01, $10
+ 324+ 9603 01 B0 01 10
+ 325+ 9607 88 00 88 00      DB $88, $00, $88, $00, $50, $00, $20, $00
+ 325+ 960B 50 00 20 00
+ 326+ 960F 50 00 88 00      DB $50, $00, $88, $00, $88, $00, $44, $00
+ 326+ 9613 88 00 44 00
+ 327+ 9617 44 00 28 00      DB $44, $00, $28, $00, $10, $00, $28, $00
+ 327+ 961B 10 00 28 00
+ 328+ 961F 44 00 44 00      DB $44, $00, $44, $00, $22, $00, $22, $00
+ 328+ 9623 22 00 22 00
+ 329+ 9627 14 00 08 00      DB $14, $00, $08, $00, $14, $00, $22, $00
+ 329+ 962B 14 00 22 00
+ 330+ 962F 22 00 11 00      DB $22, $00, $11, $00, $11, $00, $0A, $00
+ 330+ 9633 11 00 0A 00
+ 331+ 9637 04 00 0A 00      DB $04, $00, $0A, $00, $11, $00, $11, $00
+ 331+ 963B 11 00 11 00
+ 332+ 963F 08 80 08 80      DB $08, $80, $08, $80, $05, $00, $02, $00
+ 332+ 9643 05 00 02 00
+ 333+ 9647 05 00 08 80      DB $05, $00, $08, $80, $08, $80, $04, $40
+ 333+ 964B 08 80 04 40
+ 334+ 964F 04 40 02 80      DB $04, $40, $02, $80, $01, $00, $02, $80
+ 334+ 9653 01 00 02 80
+ 335+ 9657 04 40 04 40      DB $04, $40, $04, $40, $02, $20, $02, $20
+ 335+ 965B 02 20 02 20
+ 336+ 965F 01 40 00 80      DB $01, $40, $00, $80, $01, $40, $02, $20
+ 336+ 9663 01 40 02 20
+ 337+ 9667 02 20 01 10      DB $02, $20, $01, $10, $01, $10, $00, $A0
+ 337+ 966B 01 10 00 A0
+ 338+ 966F 00 40 00 A0      DB $00, $40, $00, $A0, $01, $10, $01, $10
+ 338+ 9673 01 10 01 10
+ 339+ 9677 88 00 88 00      DB $88, $00, $88, $00, $50, $00, $20, $00
+ 339+ 967B 50 00 20 00
+ 340+ 967F 20 00 20 00      DB $20, $00, $20, $00, $20, $00, $44, $00
+ 340+ 9683 20 00 44 00
+ 341+ 9687 44 00 28 00      DB $44, $00, $28, $00, $10, $00, $10, $00
+ 341+ 968B 10 00 10 00
+ 342+ 968F 10 00 10 00      DB $10, $00, $10, $00, $22, $00, $22, $00
+ 342+ 9693 22 00 22 00
+ 343+ 9697 14 00 08 00      DB $14, $00, $08, $00, $08, $00, $08, $00
+ 343+ 969B 08 00 08 00
+ 344+ 969F 08 00 11 00      DB $08, $00, $11, $00, $11, $00, $0A, $00
+ 344+ 96A3 11 00 0A 00
+ 345+ 96A7 04 00 04 00      DB $04, $00, $04, $00, $04, $00, $04, $00
+ 345+ 96AB 04 00 04 00
+ 346+ 96AF 08 80 08 80      DB $08, $80, $08, $80, $05, $00, $02, $00
+ 346+ 96B3 05 00 02 00
+ 347+ 96B7 02 00 02 00      DB $02, $00, $02, $00, $02, $00, $04, $40
+ 347+ 96BB 02 00 04 40
+ 348+ 96BF 04 40 02 80      DB $04, $40, $02, $80, $01, $00, $01, $00
+ 348+ 96C3 01 00 01 00
+ 349+ 96C7 01 00 01 00      DB $01, $00, $01, $00, $02, $20, $02, $20
+ 349+ 96CB 02 20 02 20
+ 350+ 96CF 01 40 00 80      DB $01, $40, $00, $80, $00, $80, $00, $80
+ 350+ 96D3 00 80 00 80
+ 351+ 96D7 00 80 01 10      DB $00, $80, $01, $10, $01, $10, $00, $A0
+ 351+ 96DB 01 10 00 A0
+ 352+ 96DF 00 40 00 40      DB $00, $40, $00, $40, $00, $40, $00, $40
+ 352+ 96E3 00 40 00 40
+ 353+ 96E7 F8 00 08 00      DB $F8, $00, $08, $00, $10, $00, $60, $00
+ 353+ 96EB 10 00 60 00
+ 354+ 96EF 40 00 80 00      DB $40, $00, $80, $00, $F8, $00, $7C, $00
+ 354+ 96F3 F8 00 7C 00
+ 355+ 96F7 04 00 08 00      DB $04, $00, $08, $00, $30, $00, $20, $00
+ 355+ 96FB 30 00 20 00
+ 356+ 96FF 40 00 7C 00      DB $40, $00, $7C, $00, $3E, $00, $02, $00
+ 356+ 9703 3E 00 02 00
+ 357+ 9707 04 00 18 00      DB $04, $00, $18, $00, $10, $00, $20, $00
+ 357+ 970B 10 00 20 00
+ 358+ 970F 3E 00 1F 00      DB $3E, $00, $1F, $00, $01, $00, $02, $00
+ 358+ 9713 01 00 02 00
+ 359+ 9717 0C 00 08 00      DB $0C, $00, $08, $00, $10, $00, $1F, $00
+ 359+ 971B 10 00 1F 00
+ 360+ 971F 0F 80 00 80      DB $0F, $80, $00, $80, $01, $00, $06, $00
+ 360+ 9723 01 00 06 00
+ 361+ 9727 04 00 08 00      DB $04, $00, $08, $00, $0F, $80, $07, $C0
+ 361+ 972B 0F 80 07 C0
+ 362+ 972F 00 40 00 80      DB $00, $40, $00, $80, $03, $00, $02, $00
+ 362+ 9733 03 00 02 00
+ 363+ 9737 04 00 07 C0      DB $04, $00, $07, $C0, $03, $E0, $00, $20
+ 363+ 973B 03 E0 00 20
+ 364+ 973F 00 40 01 80      DB $00, $40, $01, $80, $01, $00, $02, $00
+ 364+ 9743 01 00 02 00
+ 365+ 9747 03 E0 01 F0      DB $03, $E0, $01, $F0, $00, $10, $00, $20
+ 365+ 974B 00 10 00 20
+ 366+ 974F 00 C0 00 80      DB $00, $C0, $00, $80, $01, $00, $01, $F0
+ 366+ 9753 01 00 01 F0
+ 367+ 9757 70 00 88 00      DB $70, $00, $88, $00, $98, $00, $A8, $00
+ 367+ 975B 98 00 A8 00
+ 368+ 975F C8 00 88 00      DB $C8, $00, $88, $00, $70, $00, $38, $00
+ 368+ 9763 70 00 38 00
+ 369+ 9767 44 00 4C 00      DB $44, $00, $4C, $00, $54, $00, $64, $00
+ 369+ 976B 54 00 64 00
+ 370+ 976F 44 00 38 00      DB $44, $00, $38, $00, $1C, $00, $22, $00
+ 370+ 9773 1C 00 22 00
+ 371+ 9777 26 00 2A 00      DB $26, $00, $2A, $00, $32, $00, $22, $00
+ 371+ 977B 32 00 22 00
+ 372+ 977F 1C 00 0E 00      DB $1C, $00, $0E, $00, $11, $00, $13, $00
+ 372+ 9783 11 00 13 00
+ 373+ 9787 15 00 19 00      DB $15, $00, $19, $00, $11, $00, $0E, $00
+ 373+ 978B 11 00 0E 00
+ 374+ 978F 07 00 08 80      DB $07, $00, $08, $80, $09, $80, $0A, $80
+ 374+ 9793 09 80 0A 80
+ 375+ 9797 0C 80 08 80      DB $0C, $80, $08, $80, $07, $00, $03, $80
+ 375+ 979B 07 00 03 80
+ 376+ 979F 04 40 04 C0      DB $04, $40, $04, $C0, $05, $40, $06, $40
+ 376+ 97A3 05 40 06 40
+ 377+ 97A7 04 40 03 80      DB $04, $40, $03, $80, $01, $C0, $02, $20
+ 377+ 97AB 01 C0 02 20
+ 378+ 97AF 02 60 02 A0      DB $02, $60, $02, $A0, $03, $20, $02, $20
+ 378+ 97B3 03 20 02 20
+ 379+ 97B7 01 C0 00 E0      DB $01, $C0, $00, $E0, $01, $10, $01, $30
+ 379+ 97BB 01 10 01 30
+ 380+ 97BF 01 50 01 90      DB $01, $50, $01, $90, $01, $10, $00, $E0
+ 380+ 97C3 01 10 00 E0
+ 381+ 97C7 20 00 60 00      DB $20, $00, $60, $00, $20, $00, $20, $00
+ 381+ 97CB 20 00 20 00
+ 382+ 97CF 20 00 20 00      DB $20, $00, $20, $00, $70, $00, $10, $00
+ 382+ 97D3 70 00 10 00
+ 383+ 97D7 30 00 10 00      DB $30, $00, $10, $00, $10, $00, $10, $00
+ 383+ 97DB 10 00 10 00
+ 384+ 97DF 10 00 38 00      DB $10, $00, $38, $00, $08, $00, $18, $00
+ 384+ 97E3 08 00 18 00
+ 385+ 97E7 08 00 08 00      DB $08, $00, $08, $00, $08, $00, $08, $00
+ 385+ 97EB 08 00 08 00
+ 386+ 97EF 1C 00 04 00      DB $1C, $00, $04, $00, $0C, $00, $04, $00
+ 386+ 97F3 0C 00 04 00
+ 387+ 97F7 04 00 04 00      DB $04, $00, $04, $00, $04, $00, $0E, $00
+ 387+ 97FB 04 00 0E 00
+ 388+ 97FF 02 00 06 00      DB $02, $00, $06, $00, $02, $00, $02, $00
+ 388+ 9803 02 00 02 00
+ 389+ 9807 02 00 02 00      DB $02, $00, $02, $00, $07, $00, $01, $00
+ 389+ 980B 07 00 01 00
+ 390+ 980F 03 00 01 00      DB $03, $00, $01, $00, $01, $00, $01, $00
+ 390+ 9813 01 00 01 00
+ 391+ 9817 01 00 03 80      DB $01, $00, $03, $80, $00, $80, $01, $80
+ 391+ 981B 00 80 01 80
+ 392+ 981F 00 80 00 80      DB $00, $80, $00, $80, $00, $80, $00, $80
+ 392+ 9823 00 80 00 80
+ 393+ 9827 01 C0 00 40      DB $01, $C0, $00, $40, $00, $C0, $00, $40
+ 393+ 982B 00 C0 00 40
+ 394+ 982F 00 40 00 40      DB $00, $40, $00, $40, $00, $40, $00, $E0
+ 394+ 9833 00 40 00 E0
+ 395+ 9837 70 00 88 00      DB $70, $00, $88, $00, $08, $00, $10, $00
+ 395+ 983B 08 00 10 00
+ 396+ 983F 20 00 40 00      DB $20, $00, $40, $00, $F8, $00, $38, $00
+ 396+ 9843 F8 00 38 00
+ 397+ 9847 44 00 04 00      DB $44, $00, $04, $00, $08, $00, $10, $00
+ 397+ 984B 08 00 10 00
+ 398+ 984F 20 00 7C 00      DB $20, $00, $7C, $00, $1C, $00, $22, $00
+ 398+ 9853 1C 00 22 00
+ 399+ 9857 02 00 04 00      DB $02, $00, $04, $00, $08, $00, $10, $00
+ 399+ 985B 08 00 10 00
+ 400+ 985F 3E 00 0E 00      DB $3E, $00, $0E, $00, $11, $00, $01, $00
+ 400+ 9863 11 00 01 00
+ 401+ 9867 02 00 04 00      DB $02, $00, $04, $00, $08, $00, $1F, $00
+ 401+ 986B 08 00 1F 00
+ 402+ 986F 07 00 08 80      DB $07, $00, $08, $80, $00, $80, $01, $00
+ 402+ 9873 00 80 01 00
+ 403+ 9877 02 00 04 00      DB $02, $00, $04, $00, $0F, $80, $03, $80
+ 403+ 987B 0F 80 03 80
+ 404+ 987F 04 40 00 40      DB $04, $40, $00, $40, $00, $80, $01, $00
+ 404+ 9883 00 80 01 00
+ 405+ 9887 02 00 07 C0      DB $02, $00, $07, $C0, $01, $C0, $02, $20
+ 405+ 988B 01 C0 02 20
+ 406+ 988F 00 20 00 40      DB $00, $20, $00, $40, $00, $80, $01, $00
+ 406+ 9893 00 80 01 00
+ 407+ 9897 03 E0 00 E0      DB $03, $E0, $00, $E0, $01, $10, $00, $10
+ 407+ 989B 01 10 00 10
+ 408+ 989F 00 20 00 40      DB $00, $20, $00, $40, $00, $80, $01, $F0
+ 408+ 98A3 00 80 01 F0
+ 409+ 98A7 F8 00 10 00      DB $F8, $00, $10, $00, $20, $00, $10, $00
+ 409+ 98AB 20 00 10 00
+ 410+ 98AF 08 00 88 00      DB $08, $00, $88, $00, $70, $00, $7C, $00
+ 410+ 98B3 70 00 7C 00
+ 411+ 98B7 08 00 10 00      DB $08, $00, $10, $00, $08, $00, $04, $00
+ 411+ 98BB 08 00 04 00
+ 412+ 98BF 44 00 38 00      DB $44, $00, $38, $00, $3E, $00, $04, $00
+ 412+ 98C3 3E 00 04 00
+ 413+ 98C7 08 00 04 00      DB $08, $00, $04, $00, $02, $00, $22, $00
+ 413+ 98CB 02 00 22 00
+ 414+ 98CF 1C 00 1F 00      DB $1C, $00, $1F, $00, $02, $00, $04, $00
+ 414+ 98D3 02 00 04 00
+ 415+ 98D7 02 00 01 00      DB $02, $00, $01, $00, $11, $00, $0E, $00
+ 415+ 98DB 11 00 0E 00
+ 416+ 98DF 0F 80 01 00      DB $0F, $80, $01, $00, $02, $00, $01, $00
+ 416+ 98E3 02 00 01 00
+ 417+ 98E7 00 80 08 80      DB $00, $80, $08, $80, $07, $00, $07, $C0
+ 417+ 98EB 07 00 07 C0
+ 418+ 98EF 00 80 01 00      DB $00, $80, $01, $00, $00, $80, $00, $40
+ 418+ 98F3 00 80 00 40
+ 419+ 98F7 04 40 03 80      DB $04, $40, $03, $80, $03, $E0, $00, $40
+ 419+ 98FB 03 E0 00 40
+ 420+ 98FF 00 80 00 40      DB $00, $80, $00, $40, $00, $20, $02, $20
+ 420+ 9903 00 20 02 20
+ 421+ 9907 01 C0 01 F0      DB $01, $C0, $01, $F0, $00, $20, $00, $40
+ 421+ 990B 00 20 00 40
+ 422+ 990F 00 20 00 10      DB $00, $20, $00, $10, $01, $10, $00, $E0
+ 422+ 9913 01 10 00 E0
+ 423+ 9917 10 00 30 00      DB $10, $00, $30, $00, $50, $00, $90, $00
+ 423+ 991B 50 00 90 00
+ 424+ 991F F8 00 10 00      DB $F8, $00, $10, $00, $10, $00, $08, $00
+ 424+ 9923 10 00 08 00
+ 425+ 9927 18 00 28 00      DB $18, $00, $28, $00, $48, $00, $7C, $00
+ 425+ 992B 48 00 7C 00
+ 426+ 992F 08 00 08 00      DB $08, $00, $08, $00, $04, $00, $0C, $00
+ 426+ 9933 04 00 0C 00
+ 427+ 9937 14 00 24 00      DB $14, $00, $24, $00, $3E, $00, $04, $00
+ 427+ 993B 3E 00 04 00
+ 428+ 993F 04 00 02 00      DB $04, $00, $02, $00, $06, $00, $0A, $00
+ 428+ 9943 06 00 0A 00
+ 429+ 9947 12 00 1F 00      DB $12, $00, $1F, $00, $02, $00, $02, $00
+ 429+ 994B 02 00 02 00
+ 430+ 994F 01 00 03 00      DB $01, $00, $03, $00, $05, $00, $09, $00
+ 430+ 9953 05 00 09 00
+ 431+ 9957 0F 80 01 00      DB $0F, $80, $01, $00, $01, $00, $00, $80
+ 431+ 995B 01 00 00 80
+ 432+ 995F 01 80 02 80      DB $01, $80, $02, $80, $04, $80, $07, $C0
+ 432+ 9963 04 80 07 C0
+ 433+ 9967 00 80 00 80      DB $00, $80, $00, $80, $00, $40, $00, $C0
+ 433+ 996B 00 40 00 C0
+ 434+ 996F 01 40 02 40      DB $01, $40, $02, $40, $03, $E0, $00, $40
+ 434+ 9973 03 E0 00 40
+ 435+ 9977 00 40 00 20      DB $00, $40, $00, $20, $00, $60, $00, $A0
+ 435+ 997B 00 60 00 A0
+ 436+ 997F 01 20 01 F0      DB $01, $20, $01, $F0, $00, $20, $00, $20
+ 436+ 9983 00 20 00 20
+ 437+ 9987 F8 00 80 00      DB $F8, $00, $80, $00, $F0, $00, $08, $00
+ 437+ 998B F0 00 08 00
+ 438+ 998F 08 00 88 00      DB $08, $00, $88, $00, $70, $00, $7C, $00
+ 438+ 9993 70 00 7C 00
+ 439+ 9997 40 00 78 00      DB $40, $00, $78, $00, $04, $00, $04, $00
+ 439+ 999B 04 00 04 00
+ 440+ 999F 44 00 38 00      DB $44, $00, $38, $00, $3E, $00, $20, $00
+ 440+ 99A3 3E 00 20 00
+ 441+ 99A7 3C 00 02 00      DB $3C, $00, $02, $00, $02, $00, $22, $00
+ 441+ 99AB 02 00 22 00
+ 442+ 99AF 1C 00 1F 00      DB $1C, $00, $1F, $00, $10, $00, $1E, $00
+ 442+ 99B3 10 00 1E 00
+ 443+ 99B7 01 00 01 00      DB $01, $00, $01, $00, $11, $00, $0E, $00
+ 443+ 99BB 11 00 0E 00
+ 444+ 99BF 0F 80 08 00      DB $0F, $80, $08, $00, $0F, $00, $00, $80
+ 444+ 99C3 0F 00 00 80
+ 445+ 99C7 00 80 08 80      DB $00, $80, $08, $80, $07, $00, $07, $C0
+ 445+ 99CB 07 00 07 C0
+ 446+ 99CF 04 00 07 80      DB $04, $00, $07, $80, $00, $40, $00, $40
+ 446+ 99D3 00 40 00 40
+ 447+ 99D7 04 40 03 80      DB $04, $40, $03, $80, $03, $E0, $02, $00
+ 447+ 99DB 03 E0 02 00
+ 448+ 99DF 03 C0 00 20      DB $03, $C0, $00, $20, $00, $20, $02, $20
+ 448+ 99E3 00 20 02 20
+ 449+ 99E7 01 C0 01 F0      DB $01, $C0, $01, $F0, $01, $00, $01, $E0
+ 449+ 99EB 01 00 01 E0
+ 450+ 99EF 00 10 00 10      DB $00, $10, $00, $10, $01, $10, $00, $E0
+ 450+ 99F3 01 10 00 E0
+ 451+ 99F7 30 00 40 00      DB $30, $00, $40, $00, $80, $00, $F0, $00
+ 451+ 99FB 80 00 F0 00
+ 452+ 99FF 88 00 88 00      DB $88, $00, $88, $00, $70, $00, $18, $00
+ 452+ 9A03 70 00 18 00
+ 453+ 9A07 20 00 40 00      DB $20, $00, $40, $00, $78, $00, $44, $00
+ 453+ 9A0B 78 00 44 00
+ 454+ 9A0F 44 00 38 00      DB $44, $00, $38, $00, $0C, $00, $10, $00
+ 454+ 9A13 0C 00 10 00
+ 455+ 9A17 20 00 3C 00      DB $20, $00, $3C, $00, $22, $00, $22, $00
+ 455+ 9A1B 22 00 22 00
+ 456+ 9A1F 1C 00 06 00      DB $1C, $00, $06, $00, $08, $00, $10, $00
+ 456+ 9A23 08 00 10 00
+ 457+ 9A27 1E 00 11 00      DB $1E, $00, $11, $00, $11, $00, $0E, $00
+ 457+ 9A2B 11 00 0E 00
+ 458+ 9A2F 03 00 04 00      DB $03, $00, $04, $00, $08, $00, $0F, $00
+ 458+ 9A33 08 00 0F 00
+ 459+ 9A37 08 80 08 80      DB $08, $80, $08, $80, $07, $00, $01, $80
+ 459+ 9A3B 07 00 01 80
+ 460+ 9A3F 02 00 04 00      DB $02, $00, $04, $00, $07, $80, $04, $40
+ 460+ 9A43 07 80 04 40
+ 461+ 9A47 04 40 03 80      DB $04, $40, $03, $80, $00, $C0, $01, $00
+ 461+ 9A4B 00 C0 01 00
+ 462+ 9A4F 02 00 03 C0      DB $02, $00, $03, $C0, $02, $20, $02, $20
+ 462+ 9A53 02 20 02 20
+ 463+ 9A57 01 C0 00 60      DB $01, $C0, $00, $60, $00, $80, $01, $00
+ 463+ 9A5B 00 80 01 00
+ 464+ 9A5F 01 E0 01 10      DB $01, $E0, $01, $10, $01, $10, $00, $E0
+ 464+ 9A63 01 10 00 E0
+ 465+ 9A67 F8 00 08 00      DB $F8, $00, $08, $00, $10, $00, $20, $00
+ 465+ 9A6B 10 00 20 00
+ 466+ 9A6F 40 00 40 00      DB $40, $00, $40, $00, $40, $00, $7C, $00
+ 466+ 9A73 40 00 7C 00
+ 467+ 9A77 04 00 08 00      DB $04, $00, $08, $00, $10, $00, $20, $00
+ 467+ 9A7B 10 00 20 00
+ 468+ 9A7F 20 00 20 00      DB $20, $00, $20, $00, $3E, $00, $02, $00
+ 468+ 9A83 3E 00 02 00
+ 469+ 9A87 04 00 08 00      DB $04, $00, $08, $00, $10, $00, $10, $00
+ 469+ 9A8B 10 00 10 00
+ 470+ 9A8F 10 00 1F 00      DB $10, $00, $1F, $00, $01, $00, $02, $00
+ 470+ 9A93 01 00 02 00
+ 471+ 9A97 04 00 08 00      DB $04, $00, $08, $00, $08, $00, $08, $00
+ 471+ 9A9B 08 00 08 00
+ 472+ 9A9F 0F 80 00 80      DB $0F, $80, $00, $80, $01, $00, $02, $00
+ 472+ 9AA3 01 00 02 00
+ 473+ 9AA7 04 00 04 00      DB $04, $00, $04, $00, $04, $00, $07, $C0
+ 473+ 9AAB 04 00 07 C0
+ 474+ 9AAF 00 40 00 80      DB $00, $40, $00, $80, $01, $00, $02, $00
+ 474+ 9AB3 01 00 02 00
+ 475+ 9AB7 02 00 02 00      DB $02, $00, $02, $00, $03, $E0, $00, $20
+ 475+ 9ABB 03 E0 00 20
+ 476+ 9ABF 00 40 00 80      DB $00, $40, $00, $80, $01, $00, $01, $00
+ 476+ 9AC3 01 00 01 00
+ 477+ 9AC7 01 00 01 F0      DB $01, $00, $01, $F0, $00, $10, $00, $20
+ 477+ 9ACB 00 10 00 20
+ 478+ 9ACF 00 40 00 80      DB $00, $40, $00, $80, $00, $80, $00, $80
+ 478+ 9AD3 00 80 00 80
+ 479+ 9AD7 70 00 88 00      DB $70, $00, $88, $00, $88, $00, $70, $00
+ 479+ 9ADB 88 00 70 00
+ 480+ 9ADF 88 00 88 00      DB $88, $00, $88, $00, $70, $00, $38, $00
+ 480+ 9AE3 70 00 38 00
+ 481+ 9AE7 44 00 44 00      DB $44, $00, $44, $00, $38, $00, $44, $00
+ 481+ 9AEB 38 00 44 00
+ 482+ 9AEF 44 00 38 00      DB $44, $00, $38, $00, $1C, $00, $22, $00
+ 482+ 9AF3 1C 00 22 00
+ 483+ 9AF7 22 00 1C 00      DB $22, $00, $1C, $00, $22, $00, $22, $00
+ 483+ 9AFB 22 00 22 00
+ 484+ 9AFF 1C 00 0E 00      DB $1C, $00, $0E, $00, $11, $00, $11, $00
+ 484+ 9B03 11 00 11 00
+ 485+ 9B07 0E 00 11 00      DB $0E, $00, $11, $00, $11, $00, $0E, $00
+ 485+ 9B0B 11 00 0E 00
+ 486+ 9B0F 07 00 08 80      DB $07, $00, $08, $80, $08, $80, $07, $00
+ 486+ 9B13 08 80 07 00
+ 487+ 9B17 08 80 08 80      DB $08, $80, $08, $80, $07, $00, $03, $80
+ 487+ 9B1B 07 00 03 80
+ 488+ 9B1F 04 40 04 40      DB $04, $40, $04, $40, $03, $80, $04, $40
+ 488+ 9B23 03 80 04 40
+ 489+ 9B27 04 40 03 80      DB $04, $40, $03, $80, $01, $C0, $02, $20
+ 489+ 9B2B 01 C0 02 20
+ 490+ 9B2F 02 20 01 C0      DB $02, $20, $01, $C0, $02, $20, $02, $20
+ 490+ 9B33 02 20 02 20
+ 491+ 9B37 01 C0 00 E0      DB $01, $C0, $00, $E0, $01, $10, $01, $10
+ 491+ 9B3B 01 10 01 10
+ 492+ 9B3F 00 E0 01 10      DB $00, $E0, $01, $10, $01, $10, $00, $E0
+ 492+ 9B43 01 10 00 E0
+ 493+ 9B47 70 00 88 00      DB $70, $00, $88, $00, $88, $00, $78, $00
+ 493+ 9B4B 88 00 78 00
+ 494+ 9B4F 08 00 10 00      DB $08, $00, $10, $00, $60, $00, $38, $00
+ 494+ 9B53 60 00 38 00
+ 495+ 9B57 44 00 44 00      DB $44, $00, $44, $00, $3C, $00, $04, $00
+ 495+ 9B5B 3C 00 04 00
+ 496+ 9B5F 08 00 30 00      DB $08, $00, $30, $00, $1C, $00, $22, $00
+ 496+ 9B63 1C 00 22 00
+ 497+ 9B67 22 00 1E 00      DB $22, $00, $1E, $00, $02, $00, $04, $00
+ 497+ 9B6B 02 00 04 00
+ 498+ 9B6F 18 00 0E 00      DB $18, $00, $0E, $00, $11, $00, $11, $00
+ 498+ 9B73 11 00 11 00
+ 499+ 9B77 0F 00 01 00      DB $0F, $00, $01, $00, $02, $00, $0C, $00
+ 499+ 9B7B 02 00 0C 00
+ 500+ 9B7F 07 00 08 80      DB $07, $00, $08, $80, $08, $80, $07, $80
+ 500+ 9B83 08 80 07 80
+ 501+ 9B87 00 80 01 00      DB $00, $80, $01, $00, $06, $00, $03, $80
+ 501+ 9B8B 06 00 03 80
+ 502+ 9B8F 04 40 04 40      DB $04, $40, $04, $40, $03, $C0, $00, $40
+ 502+ 9B93 03 C0 00 40
+ 503+ 9B97 00 80 03 00      DB $00, $80, $03, $00, $01, $C0, $02, $20
+ 503+ 9B9B 01 C0 02 20
+ 504+ 9B9F 02 20 01 E0      DB $02, $20, $01, $E0, $00, $20, $00, $40
+ 504+ 9BA3 00 20 00 40
+ 505+ 9BA7 01 80 00 E0      DB $01, $80, $00, $E0, $01, $10, $01, $10
+ 505+ 9BAB 01 10 01 10
+ 506+ 9BAF 00 F0 00 10      DB $00, $F0, $00, $10, $00, $20, $00, $C0
+ 506+ 9BB3 00 20 00 C0
+ 507+ 9BB7 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 507+ 9BBB 00 00 00 00
+ 508+ 9BBF 00 00 60 00      DB $00, $00, $60, $00, $60, $00, $00, $00
+ 508+ 9BC3 60 00 00 00
+ 509+ 9BC7 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 509+ 9BCB 00 00 00 00
+ 510+ 9BCF 30 00 30 00      DB $30, $00, $30, $00, $00, $00, $00, $00
+ 510+ 9BD3 00 00 00 00
+ 511+ 9BD7 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $18, $00
+ 511+ 9BDB 00 00 18 00
+ 512+ 9BDF 18 00 00 00      DB $18, $00, $00, $00, $00, $00, $00, $00
+ 512+ 9BE3 00 00 00 00
+ 513+ 9BE7 00 00 00 00      DB $00, $00, $00, $00, $0C, $00, $0C, $00
+ 513+ 9BEB 0C 00 0C 00
+ 514+ 9BEF 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 514+ 9BF3 00 00 00 00
+ 515+ 9BF7 00 00 06 00      DB $00, $00, $06, $00, $06, $00, $00, $00
+ 515+ 9BFB 06 00 00 00
+ 516+ 9BFF 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 516+ 9C03 00 00 00 00
+ 517+ 9C07 03 00 03 00      DB $03, $00, $03, $00, $00, $00, $00, $00
+ 517+ 9C0B 00 00 00 00
+ 518+ 9C0F 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $01, $80
+ 518+ 9C13 00 00 01 80
+ 519+ 9C17 01 80 00 00      DB $01, $80, $00, $00, $00, $00, $00, $00
+ 519+ 9C1B 00 00 00 00
+ 520+ 9C1F 00 00 00 00      DB $00, $00, $00, $00, $00, $C0, $00, $C0
+ 520+ 9C23 00 C0 00 C0
+ 521+ 9C27 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $60, $00
+ 521+ 9C2B 00 00 60 00
+ 522+ 9C2F 60 00 20 00      DB $60, $00, $20, $00, $40, $00, $00, $00
+ 522+ 9C33 40 00 00 00
+ 523+ 9C37 00 00 00 00      DB $00, $00, $00, $00, $30, $00, $30, $00
+ 523+ 9C3B 30 00 30 00
+ 524+ 9C3F 10 00 20 00      DB $10, $00, $20, $00, $00, $00, $00, $00
+ 524+ 9C43 00 00 00 00
+ 525+ 9C47 00 00 18 00      DB $00, $00, $18, $00, $18, $00, $08, $00
+ 525+ 9C4B 18 00 08 00
+ 526+ 9C4F 10 00 00 00      DB $10, $00, $00, $00, $00, $00, $00, $00
+ 526+ 9C53 00 00 00 00
+ 527+ 9C57 0C 00 0C 00      DB $0C, $00, $0C, $00, $04, $00, $08, $00
+ 527+ 9C5B 04 00 08 00
+ 528+ 9C5F 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $06, $00
+ 528+ 9C63 00 00 06 00
+ 529+ 9C67 06 00 02 00      DB $06, $00, $02, $00, $04, $00, $00, $00
+ 529+ 9C6B 04 00 00 00
+ 530+ 9C6F 00 00 00 00      DB $00, $00, $00, $00, $03, $00, $03, $00
+ 530+ 9C73 03 00 03 00
+ 531+ 9C77 01 00 02 00      DB $01, $00, $02, $00, $00, $00, $00, $00
+ 531+ 9C7B 00 00 00 00
+ 532+ 9C7F 00 00 01 80      DB $00, $00, $01, $80, $01, $80, $00, $80
+ 532+ 9C83 01 80 00 80
+ 533+ 9C87 01 00 00 00      DB $01, $00, $00, $00, $00, $00, $00, $00
+ 533+ 9C8B 00 00 00 00
+ 534+ 9C8F 00 C0 00 C0      DB $00, $C0, $00, $C0, $00, $40, $00, $80
+ 534+ 9C93 00 40 00 80
+ 535+ 9C97 00 00 60 00      DB $00, $00, $60, $00, $60, $00, $00, $00
+ 535+ 9C9B 60 00 00 00
+ 536+ 9C9F 60 00 60 00      DB $60, $00, $60, $00, $00, $00, $00, $00
+ 536+ 9CA3 00 00 00 00
+ 537+ 9CA7 30 00 30 00      DB $30, $00, $30, $00, $00, $00, $30, $00
+ 537+ 9CAB 00 00 30 00
+ 538+ 9CAF 30 00 00 00      DB $30, $00, $00, $00, $00, $00, $18, $00
+ 538+ 9CB3 00 00 18 00
+ 539+ 9CB7 18 00 00 00      DB $18, $00, $00, $00, $18, $00, $18, $00
+ 539+ 9CBB 18 00 18 00
+ 540+ 9CBF 00 00 00 00      DB $00, $00, $00, $00, $0C, $00, $0C, $00
+ 540+ 9CC3 0C 00 0C 00
+ 541+ 9CC7 00 00 0C 00      DB $00, $00, $0C, $00, $0C, $00, $00, $00
+ 541+ 9CCB 0C 00 00 00
+ 542+ 9CCF 00 00 06 00      DB $00, $00, $06, $00, $06, $00, $00, $00
+ 542+ 9CD3 06 00 00 00
+ 543+ 9CD7 06 00 06 00      DB $06, $00, $06, $00, $00, $00, $00, $00
+ 543+ 9CDB 00 00 00 00
+ 544+ 9CDF 03 00 03 00      DB $03, $00, $03, $00, $00, $00, $03, $00
+ 544+ 9CE3 00 00 03 00
+ 545+ 9CE7 03 00 00 00      DB $03, $00, $00, $00, $00, $00, $01, $80
+ 545+ 9CEB 00 00 01 80
+ 546+ 9CEF 01 80 00 00      DB $01, $80, $00, $00, $01, $80, $01, $80
+ 546+ 9CF3 01 80 01 80
+ 547+ 9CF7 00 00 00 00      DB $00, $00, $00, $00, $00, $C0, $00, $C0
+ 547+ 9CFB 00 C0 00 C0
+ 548+ 9CFF 00 00 00 C0      DB $00, $00, $00, $C0, $00, $C0, $00, $00
+ 548+ 9D03 00 C0 00 00
+ 549+ 9D07 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $70, $00
+ 549+ 9D0B 00 00 70 00
+ 550+ 9D0F 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 550+ 9D13 00 00 00 00
+ 551+ 9D17 00 00 00 00      DB $00, $00, $00, $00, $38, $00, $00, $00
+ 551+ 9D1B 38 00 00 00
+ 552+ 9D1F 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 552+ 9D23 00 00 00 00
+ 553+ 9D27 00 00 1C 00      DB $00, $00, $1C, $00, $00, $00, $00, $00
+ 553+ 9D2B 00 00 00 00
+ 554+ 9D2F 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 554+ 9D33 00 00 00 00
+ 555+ 9D37 0E 00 00 00      DB $0E, $00, $00, $00, $00, $00, $00, $00
+ 555+ 9D3B 00 00 00 00
+ 556+ 9D3F 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $07, $00
+ 556+ 9D43 00 00 07 00
+ 557+ 9D47 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 557+ 9D4B 00 00 00 00
+ 558+ 9D4F 00 00 00 00      DB $00, $00, $00, $00, $03, $80, $00, $00
+ 558+ 9D53 03 80 00 00
+ 559+ 9D57 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 559+ 9D5B 00 00 00 00
+ 560+ 9D5F 00 00 01 C0      DB $00, $00, $01, $C0, $00, $00, $00, $00
+ 560+ 9D63 00 00 00 00
+ 561+ 9D67 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 561+ 9D6B 00 00 00 00
+ 562+ 9D6F 00 E0 00 00      DB $00, $E0, $00, $00, $00, $00, $00, $00
+ 562+ 9D73 00 00 00 00
+ 563+ 9D77 00 00 20 00      DB $00, $00, $20, $00, $20, $00, $F8, $00
+ 563+ 9D7B 20 00 F8 00
+ 564+ 9D7F 20 00 20 00      DB $20, $00, $20, $00, $00, $00, $00, $00
+ 564+ 9D83 00 00 00 00
+ 565+ 9D87 10 00 10 00      DB $10, $00, $10, $00, $7C, $00, $10, $00
+ 565+ 9D8B 7C 00 10 00
+ 566+ 9D8F 10 00 00 00      DB $10, $00, $00, $00, $00, $00, $08, $00
+ 566+ 9D93 00 00 08 00
+ 567+ 9D97 08 00 3E 00      DB $08, $00, $3E, $00, $08, $00, $08, $00
+ 567+ 9D9B 08 00 08 00
+ 568+ 9D9F 00 00 00 00      DB $00, $00, $00, $00, $04, $00, $04, $00
+ 568+ 9DA3 04 00 04 00
+ 569+ 9DA7 1F 00 04 00      DB $1F, $00, $04, $00, $04, $00, $00, $00
+ 569+ 9DAB 04 00 00 00
+ 570+ 9DAF 00 00 02 00      DB $00, $00, $02, $00, $02, $00, $0F, $80
+ 570+ 9DB3 02 00 0F 80
+ 571+ 9DB7 02 00 02 00      DB $02, $00, $02, $00, $00, $00, $00, $00
+ 571+ 9DBB 00 00 00 00
+ 572+ 9DBF 01 00 01 00      DB $01, $00, $01, $00, $07, $C0, $01, $00
+ 572+ 9DC3 07 C0 01 00
+ 573+ 9DC7 01 00 00 00      DB $01, $00, $00, $00, $00, $00, $00, $80
+ 573+ 9DCB 00 00 00 80
+ 574+ 9DCF 00 80 03 E0      DB $00, $80, $03, $E0, $00, $80, $00, $80
+ 574+ 9DD3 00 80 00 80
+ 575+ 9DD7 00 00 00 00      DB $00, $00, $00, $00, $00, $40, $00, $40
+ 575+ 9DDB 00 40 00 40
+ 576+ 9DDF 01 F0 00 40      DB $01, $F0, $00, $40, $00, $40, $00, $00
+ 576+ 9DE3 00 40 00 00
+ 577+ 9DE7 20 00 20 00      DB $20, $00, $20, $00, $20, $00, $20, $00
+ 577+ 9DEB 20 00 20 00
+ 578+ 9DEF 20 00 00 00      DB $20, $00, $00, $00, $20, $00, $10, $00
+ 578+ 9DF3 20 00 10 00
+ 579+ 9DF7 10 00 10 00      DB $10, $00, $10, $00, $10, $00, $10, $00
+ 579+ 9DFB 10 00 10 00
+ 580+ 9DFF 00 00 10 00      DB $00, $00, $10, $00, $08, $00, $08, $00
+ 580+ 9E03 08 00 08 00
+ 581+ 9E07 08 00 08 00      DB $08, $00, $08, $00, $08, $00, $00, $00
+ 581+ 9E0B 08 00 00 00
+ 582+ 9E0F 08 00 04 00      DB $08, $00, $04, $00, $04, $00, $04, $00
+ 582+ 9E13 04 00 04 00
+ 583+ 9E17 04 00 04 00      DB $04, $00, $04, $00, $00, $00, $04, $00
+ 583+ 9E1B 00 00 04 00
+ 584+ 9E1F 02 00 02 00      DB $02, $00, $02, $00, $02, $00, $02, $00
+ 584+ 9E23 02 00 02 00
+ 585+ 9E27 02 00 00 00      DB $02, $00, $00, $00, $02, $00, $01, $00
+ 585+ 9E2B 02 00 01 00
+ 586+ 9E2F 01 00 01 00      DB $01, $00, $01, $00, $01, $00, $01, $00
+ 586+ 9E33 01 00 01 00
+ 587+ 9E37 00 00 01 00      DB $00, $00, $01, $00, $00, $80, $00, $80
+ 587+ 9E3B 00 80 00 80
+ 588+ 9E3F 00 80 00 80      DB $00, $80, $00, $80, $00, $80, $00, $00
+ 588+ 9E43 00 80 00 00
+ 589+ 9E47 00 80 00 40      DB $00, $80, $00, $40, $00, $40, $00, $40
+ 589+ 9E4B 00 40 00 40
+ 590+ 9E4F 00 40 00 40      DB $00, $40, $00, $40, $00, $00, $00, $40
+ 590+ 9E53 00 00 00 40
+ 591+ 9E57 70 00 88 00      DB $70, $00, $88, $00, $08, $00, $30, $00
+ 591+ 9E5B 08 00 30 00
+ 592+ 9E5F 20 00 00 00      DB $20, $00, $00, $00, $20, $00, $38, $00
+ 592+ 9E63 20 00 38 00
+ 593+ 9E67 44 00 04 00      DB $44, $00, $04, $00, $18, $00, $10, $00
+ 593+ 9E6B 18 00 10 00
+ 594+ 9E6F 00 00 10 00      DB $00, $00, $10, $00, $1C, $00, $22, $00
+ 594+ 9E73 1C 00 22 00
+ 595+ 9E77 02 00 0C 00      DB $02, $00, $0C, $00, $08, $00, $00, $00
+ 595+ 9E7B 08 00 00 00
+ 596+ 9E7F 08 00 0E 00      DB $08, $00, $0E, $00, $11, $00, $01, $00
+ 596+ 9E83 11 00 01 00
+ 597+ 9E87 06 00 04 00      DB $06, $00, $04, $00, $00, $00, $04, $00
+ 597+ 9E8B 00 00 04 00
+ 598+ 9E8F 07 00 08 80      DB $07, $00, $08, $80, $00, $80, $03, $00
+ 598+ 9E93 00 80 03 00
+ 599+ 9E97 02 00 00 00      DB $02, $00, $00, $00, $02, $00, $03, $80
+ 599+ 9E9B 02 00 03 80
+ 600+ 9E9F 04 40 00 40      DB $04, $40, $00, $40, $01, $80, $01, $00
+ 600+ 9EA3 01 80 01 00
+ 601+ 9EA7 00 00 01 00      DB $00, $00, $01, $00, $01, $C0, $02, $20
+ 601+ 9EAB 01 C0 02 20
+ 602+ 9EAF 00 20 00 C0      DB $00, $20, $00, $C0, $00, $80, $00, $00
+ 602+ 9EB3 00 80 00 00
+ 603+ 9EB7 00 80 00 E0      DB $00, $80, $00, $E0, $01, $10, $00, $10
+ 603+ 9EBB 01 10 00 10
+ 604+ 9EBF 00 60 00 40      DB $00, $60, $00, $40, $00, $00, $00, $40
+ 604+ 9EC3 00 00 00 40
+ 605+ 9EC7 08 00 08 00      DB $08, $00, $08, $00, $10, $00, $20, $00
+ 605+ 9ECB 10 00 20 00
+ 606+ 9ECF 40 00 80 00      DB $40, $00, $80, $00, $80, $00, $04, $00
+ 606+ 9ED3 80 00 04 00
+ 607+ 9ED7 04 00 08 00      DB $04, $00, $08, $00, $10, $00, $20, $00
+ 607+ 9EDB 10 00 20 00
+ 608+ 9EDF 40 00 40 00      DB $40, $00, $40, $00, $02, $00, $02, $00
+ 608+ 9EE3 02 00 02 00
+ 609+ 9EE7 04 00 08 00      DB $04, $00, $08, $00, $10, $00, $20, $00
+ 609+ 9EEB 10 00 20 00
+ 610+ 9EEF 20 00 01 00      DB $20, $00, $01, $00, $01, $00, $02, $00
+ 610+ 9EF3 01 00 02 00
+ 611+ 9EF7 04 00 08 00      DB $04, $00, $08, $00, $10, $00, $10, $00
+ 611+ 9EFB 10 00 10 00
+ 612+ 9EFF 00 80 00 80      DB $00, $80, $00, $80, $01, $00, $02, $00
+ 612+ 9F03 01 00 02 00
+ 613+ 9F07 04 00 08 00      DB $04, $00, $08, $00, $08, $00, $00, $40
+ 613+ 9F0B 08 00 00 40
+ 614+ 9F0F 00 40 00 80      DB $00, $40, $00, $80, $01, $00, $02, $00
+ 614+ 9F13 01 00 02 00
+ 615+ 9F17 04 00 04 00      DB $04, $00, $04, $00, $00, $20, $00, $20
+ 615+ 9F1B 00 20 00 20
+ 616+ 9F1F 00 40 00 80      DB $00, $40, $00, $80, $01, $00, $02, $00
+ 616+ 9F23 01 00 02 00
+ 617+ 9F27 02 00 00 10      DB $02, $00, $00, $10, $00, $10, $00, $20
+ 617+ 9F2B 00 10 00 20
+ 618+ 9F2F 00 40 00 80      DB $00, $40, $00, $80, $01, $00, $01, $00
+ 618+ 9F33 01 00 01 00
+ 619+ 9F37 20 00 20 00      DB $20, $00, $20, $00, $00, $00, $00, $00
+ 619+ 9F3B 00 00 00 00
+ 620+ 9F3F 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $10, $00
+ 620+ 9F43 00 00 10 00
+ 621+ 9F47 10 00 00 00      DB $10, $00, $00, $00, $00, $00, $00, $00
+ 621+ 9F4B 00 00 00 00
+ 622+ 9F4F 00 00 00 00      DB $00, $00, $00, $00, $08, $00, $08, $00
+ 622+ 9F53 08 00 08 00
+ 623+ 9F57 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 623+ 9F5B 00 00 00 00
+ 624+ 9F5F 00 00 04 00      DB $00, $00, $04, $00, $04, $00, $00, $00
+ 624+ 9F63 04 00 00 00
+ 625+ 9F67 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 625+ 9F6B 00 00 00 00
+ 626+ 9F6F 02 00 02 00      DB $02, $00, $02, $00, $00, $00, $00, $00
+ 626+ 9F73 00 00 00 00
+ 627+ 9F77 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $01, $00
+ 627+ 9F7B 00 00 01 00
+ 628+ 9F7F 01 00 00 00      DB $01, $00, $00, $00, $00, $00, $00, $00
+ 628+ 9F83 00 00 00 00
+ 629+ 9F87 00 00 00 00      DB $00, $00, $00, $00, $00, $80, $00, $80
+ 629+ 9F8B 00 80 00 80
+ 630+ 9F8F 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 630+ 9F93 00 00 00 00
+ 631+ 9F97 00 00 00 40      DB $00, $00, $00, $40, $00, $40, $00, $00
+ 631+ 9F9B 00 40 00 00
+ 632+ 9F9F 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 632+ 9FA3 00 00 00 00
+ 633+ 9FA7 50 00 F8 00      DB $50, $00, $F8, $00, $50, $00, $50, $00
+ 633+ 9FAB 50 00 50 00
+ 634+ 9FAF F8 00 50 00      DB $F8, $00, $50, $00, $00, $00, $28, $00
+ 634+ 9FB3 00 00 28 00
+ 635+ 9FB7 7C 00 28 00      DB $7C, $00, $28, $00, $28, $00, $7C, $00
+ 635+ 9FBB 28 00 7C 00
+ 636+ 9FBF 28 00 00 00      DB $28, $00, $00, $00, $14, $00, $3E, $00
+ 636+ 9FC3 14 00 3E 00
+ 637+ 9FC7 14 00 14 00      DB $14, $00, $14, $00, $3E, $00, $14, $00
+ 637+ 9FCB 3E 00 14 00
+ 638+ 9FCF 00 00 0A 00      DB $00, $00, $0A, $00, $1F, $00, $0A, $00
+ 638+ 9FD3 1F 00 0A 00
+ 639+ 9FD7 0A 00 1F 00      DB $0A, $00, $1F, $00, $0A, $00, $00, $00
+ 639+ 9FDB 0A 00 00 00
+ 640+ 9FDF 05 00 0F 80      DB $05, $00, $0F, $80, $05, $00, $05, $00
+ 640+ 9FE3 05 00 05 00
+ 641+ 9FE7 0F 80 05 00      DB $0F, $80, $05, $00, $00, $00, $02, $80
+ 641+ 9FEB 00 00 02 80
+ 642+ 9FEF 07 C0 02 80      DB $07, $C0, $02, $80, $02, $80, $07, $C0
+ 642+ 9FF3 02 80 07 C0
+ 643+ 9FF7 02 80 00 00      DB $02, $80, $00, $00, $01, $40, $03, $E0
+ 643+ 9FFB 01 40 03 E0
+ 644+ 9FFF 01 40 01 40      DB $01, $40, $01, $40, $03, $E0, $01, $40
+ 644+ A003 03 E0 01 40
+ 645+ A007 00 00 00 A0      DB $00, $00, $00, $A0, $01, $F0, $00, $A0
+ 645+ A00B 01 F0 00 A0
+ 646+ A00F 00 A0 01 F0      DB $00, $A0, $01, $F0, $00, $A0, $00, $00
+ 646+ A013 00 A0 00 00
+ 647+ A017 20 00 78 00      DB $20, $00, $78, $00, $80, $00, $70, $00
+ 647+ A01B 80 00 70 00
+ 648+ A01F 08 00 F0 00      DB $08, $00, $F0, $00, $20, $00, $10, $00
+ 648+ A023 20 00 10 00
+ 649+ A027 3C 00 40 00      DB $3C, $00, $40, $00, $38, $00, $04, $00
+ 649+ A02B 38 00 04 00
+ 650+ A02F 78 00 10 00      DB $78, $00, $10, $00, $08, $00, $1E, $00
+ 650+ A033 08 00 1E 00
+ 651+ A037 20 00 1C 00      DB $20, $00, $1C, $00, $02, $00, $3C, $00
+ 651+ A03B 02 00 3C 00
+ 652+ A03F 08 00 04 00      DB $08, $00, $04, $00, $0F, $00, $10, $00
+ 652+ A043 0F 00 10 00
+ 653+ A047 0E 00 01 00      DB $0E, $00, $01, $00, $1E, $00, $04, $00
+ 653+ A04B 1E 00 04 00
+ 654+ A04F 02 00 07 80      DB $02, $00, $07, $80, $08, $00, $07, $00
+ 654+ A053 08 00 07 00
+ 655+ A057 00 80 0F 00      DB $00, $80, $0F, $00, $02, $00, $01, $00
+ 655+ A05B 02 00 01 00
+ 656+ A05F 03 C0 04 00      DB $03, $C0, $04, $00, $03, $80, $00, $40
+ 656+ A063 03 80 00 40
+ 657+ A067 07 80 01 00      DB $07, $80, $01, $00, $00, $80, $01, $E0
+ 657+ A06B 00 80 01 E0
+ 658+ A06F 02 00 01 C0      DB $02, $00, $01, $C0, $00, $20, $03, $C0
+ 658+ A073 00 20 03 C0
+ 659+ A077 00 80 00 40      DB $00, $80, $00, $40, $00, $F0, $01, $00
+ 659+ A07B 00 F0 01 00
+ 660+ A07F 00 E0 00 10      DB $00, $E0, $00, $10, $01, $E0, $00, $40
+ 660+ A083 01 E0 00 40
+ 661+ A087 C8 00 D0 00      DB $C8, $00, $D0, $00, $10, $00, $20, $00
+ 661+ A08B 10 00 20 00
+ 662+ A08F 40 00 58 00      DB $40, $00, $58, $00, $68, $00, $64, $00
+ 662+ A093 68 00 64 00
+ 663+ A097 68 00 08 00      DB $68, $00, $08, $00, $10, $00, $20, $00
+ 663+ A09B 10 00 20 00
+ 664+ A09F 2C 00 34 00      DB $2C, $00, $34, $00, $32, $00, $34, $00
+ 664+ A0A3 32 00 34 00
+ 665+ A0A7 04 00 08 00      DB $04, $00, $08, $00, $10, $00, $16, $00
+ 665+ A0AB 10 00 16 00
+ 666+ A0AF 1A 00 19 00      DB $1A, $00, $19, $00, $1A, $00, $02, $00
+ 666+ A0B3 1A 00 02 00
+ 667+ A0B7 04 00 08 00      DB $04, $00, $08, $00, $0B, $00, $0D, $00
+ 667+ A0BB 0B 00 0D 00
+ 668+ A0BF 0C 80 0D 00      DB $0C, $80, $0D, $00, $01, $00, $02, $00
+ 668+ A0C3 01 00 02 00
+ 669+ A0C7 04 00 05 80      DB $04, $00, $05, $80, $06, $80, $06, $40
+ 669+ A0CB 06 80 06 40
+ 670+ A0CF 06 80 00 80      DB $06, $80, $00, $80, $01, $00, $02, $00
+ 670+ A0D3 01 00 02 00
+ 671+ A0D7 02 C0 03 40      DB $02, $C0, $03, $40, $03, $20, $03, $40
+ 671+ A0DB 03 20 03 40
+ 672+ A0DF 00 40 00 80      DB $00, $40, $00, $80, $01, $00, $01, $60
+ 672+ A0E3 01 00 01 60
+ 673+ A0E7 01 A0 01 90      DB $01, $A0, $01, $90, $01, $A0, $00, $20
+ 673+ A0EB 01 A0 00 20
+ 674+ A0EF 00 40 00 80      DB $00, $40, $00, $80, $00, $B0, $00, $D0
+ 674+ A0F3 00 B0 00 D0
+ 675+ A0F7 40 00 20 00      DB $40, $00, $20, $00, $10, $00, $08, $00
+ 675+ A0FB 10 00 08 00
+ 676+ A0FF 10 00 20 00      DB $10, $00, $20, $00, $40, $00, $20, $00
+ 676+ A103 40 00 20 00
+ 677+ A107 10 00 08 00      DB $10, $00, $08, $00, $04, $00, $08, $00
+ 677+ A10B 04 00 08 00
+ 678+ A10F 10 00 20 00      DB $10, $00, $20, $00, $10, $00, $08, $00
+ 678+ A113 10 00 08 00
+ 679+ A117 04 00 02 00      DB $04, $00, $02, $00, $04, $00, $08, $00
+ 679+ A11B 04 00 08 00
+ 680+ A11F 10 00 08 00      DB $10, $00, $08, $00, $04, $00, $02, $00
+ 680+ A123 04 00 02 00
+ 681+ A127 01 00 02 00      DB $01, $00, $02, $00, $04, $00, $08, $00
+ 681+ A12B 04 00 08 00
+ 682+ A12F 04 00 02 00      DB $04, $00, $02, $00, $01, $00, $00, $80
+ 682+ A133 01 00 00 80
+ 683+ A137 01 00 02 00      DB $01, $00, $02, $00, $04, $00, $02, $00
+ 683+ A13B 04 00 02 00
+ 684+ A13F 01 00 00 80      DB $01, $00, $00, $80, $00, $40, $00, $80
+ 684+ A143 00 40 00 80
+ 685+ A147 01 00 02 00      DB $01, $00, $02, $00, $01, $00, $00, $80
+ 685+ A14B 01 00 00 80
+ 686+ A14F 00 40 00 20      DB $00, $40, $00, $20, $00, $40, $00, $80
+ 686+ A153 00 40 00 80
+ 687+ A157 01 00 00 80      DB $01, $00, $00, $80, $00, $40, $00, $20
+ 687+ A15B 00 40 00 20
+ 688+ A15F 00 10 00 20      DB $00, $10, $00, $20, $00, $40, $00, $80
+ 688+ A163 00 40 00 80
+ 689+ A167 08 00 10 00      DB $08, $00, $10, $00, $20, $00, $40, $00
+ 689+ A16B 20 00 40 00
+ 690+ A16F 20 00 10 00      DB $20, $00, $10, $00, $08, $00, $04, $00
+ 690+ A173 08 00 04 00
+ 691+ A177 08 00 10 00      DB $08, $00, $10, $00, $20, $00, $10, $00
+ 691+ A17B 20 00 10 00
+ 692+ A17F 08 00 04 00      DB $08, $00, $04, $00, $02, $00, $04, $00
+ 692+ A183 02 00 04 00
+ 693+ A187 08 00 10 00      DB $08, $00, $10, $00, $08, $00, $04, $00
+ 693+ A18B 08 00 04 00
+ 694+ A18F 02 00 01 00      DB $02, $00, $01, $00, $02, $00, $04, $00
+ 694+ A193 02 00 04 00
+ 695+ A197 08 00 04 00      DB $08, $00, $04, $00, $02, $00, $01, $00
+ 695+ A19B 02 00 01 00
+ 696+ A19F 00 80 01 00      DB $00, $80, $01, $00, $02, $00, $04, $00
+ 696+ A1A3 02 00 04 00
+ 697+ A1A7 02 00 01 00      DB $02, $00, $01, $00, $00, $80, $00, $40
+ 697+ A1AB 00 80 00 40
+ 698+ A1AF 00 80 01 00      DB $00, $80, $01, $00, $02, $00, $01, $00
+ 698+ A1B3 02 00 01 00
+ 699+ A1B7 00 80 00 40      DB $00, $80, $00, $40, $00, $20, $00, $40
+ 699+ A1BB 00 20 00 40
+ 700+ A1BF 00 80 01 00      DB $00, $80, $01, $00, $00, $80, $00, $40
+ 700+ A1C3 00 80 00 40
+ 701+ A1C7 00 20 00 10      DB $00, $20, $00, $10, $00, $20, $00, $40
+ 701+ A1CB 00 20 00 40
+ 702+ A1CF 00 80 00 40      DB $00, $80, $00, $40, $00, $20, $00, $10
+ 702+ A1D3 00 20 00 10
+ 703+ A1D7 00 00 00 00      DB $00, $00, $00, $00, $F8, $00, $00, $00
+ 703+ A1DB F8 00 00 00
+ 704+ A1DF F8 00 00 00      DB $F8, $00, $00, $00, $00, $00, $00, $00
+ 704+ A1E3 00 00 00 00
+ 705+ A1E7 00 00 7C 00      DB $00, $00, $7C, $00, $00, $00, $7C, $00
+ 705+ A1EB 00 00 7C 00
+ 706+ A1EF 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 706+ A1F3 00 00 00 00
+ 707+ A1F7 3E 00 00 00      DB $3E, $00, $00, $00, $3E, $00, $00, $00
+ 707+ A1FB 3E 00 00 00
+ 708+ A1FF 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $1F, $00
+ 708+ A203 00 00 1F 00
+ 709+ A207 00 00 1F 00      DB $00, $00, $1F, $00, $00, $00, $00, $00
+ 709+ A20B 00 00 00 00
+ 710+ A20F 00 00 00 00      DB $00, $00, $00, $00, $0F, $80, $00, $00
+ 710+ A213 0F 80 00 00
+ 711+ A217 0F 80 00 00      DB $0F, $80, $00, $00, $00, $00, $00, $00
+ 711+ A21B 00 00 00 00
+ 712+ A21F 00 00 07 C0      DB $00, $00, $07, $C0, $00, $00, $07, $C0
+ 712+ A223 00 00 07 C0
+ 713+ A227 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $00, $00
+ 713+ A22B 00 00 00 00
+ 714+ A22F 03 E0 00 00      DB $03, $E0, $00, $00, $03, $E0, $00, $00
+ 714+ A233 03 E0 00 00
+ 715+ A237 00 00 00 00      DB $00, $00, $00, $00, $00, $00, $01, $F0
+ 715+ A23B 00 00 01 F0
+ 716+ A23F 00 00 01 F0      DB $00, $00, $01, $F0, $00, $00, $00, $00
+ 716+ A243 00 00 00 00
+ 717+ A247 10 00 20 00      DB $10, $00, $20, $00, $40, $00, $40, $00
+ 717+ A24B 40 00 40 00
+ 718+ A24F 40 00 20 00      DB $40, $00, $20, $00, $10, $00, $08, $00
+ 718+ A253 10 00 08 00
+ 719+ A257 10 00 20 00      DB $10, $00, $20, $00, $20, $00, $20, $00
+ 719+ A25B 20 00 20 00
+ 720+ A25F 10 00 08 00      DB $10, $00, $08, $00, $04, $00, $08, $00
+ 720+ A263 04 00 08 00
+ 721+ A267 10 00 10 00      DB $10, $00, $10, $00, $10, $00, $08, $00
+ 721+ A26B 10 00 08 00
+ 722+ A26F 04 00 02 00      DB $04, $00, $02, $00, $04, $00, $08, $00
+ 722+ A273 04 00 08 00
+ 723+ A277 08 00 08 00      DB $08, $00, $08, $00, $04, $00, $02, $00
+ 723+ A27B 04 00 02 00
+ 724+ A27F 01 00 02 00      DB $01, $00, $02, $00, $04, $00, $04, $00
+ 724+ A283 04 00 04 00
+ 725+ A287 04 00 02 00      DB $04, $00, $02, $00, $01, $00, $00, $80
+ 725+ A28B 01 00 00 80
+ 726+ A28F 01 00 02 00      DB $01, $00, $02, $00, $02, $00, $02, $00
+ 726+ A293 02 00 02 00
+ 727+ A297 01 00 00 80      DB $01, $00, $00, $80, $00, $40, $00, $80
+ 727+ A29B 00 40 00 80
+ 728+ A29F 01 00 01 00      DB $01, $00, $01, $00, $01, $00, $00, $80
+ 728+ A2A3 01 00 00 80
+ 729+ A2A7 00 40 00 20      DB $00, $40, $00, $20, $00, $40, $00, $80
+ 729+ A2AB 00 40 00 80
+ 730+ A2AF 00 80 00 80      DB $00, $80, $00, $80, $00, $40, $00, $20
+ 730+ A2B3 00 40 00 20
+ 731+ A2B7 40 00 20 00      DB $40, $00, $20, $00, $10, $00, $10, $00
+ 731+ A2BB 10 00 10 00
+ 732+ A2BF 10 00 20 00      DB $10, $00, $20, $00, $40, $00, $20, $00
+ 732+ A2C3 40 00 20 00
+ 733+ A2C7 10 00 08 00      DB $10, $00, $08, $00, $08, $00, $08, $00
+ 733+ A2CB 08 00 08 00
+ 734+ A2CF 10 00 20 00      DB $10, $00, $20, $00, $10, $00, $08, $00
+ 734+ A2D3 10 00 08 00
+ 735+ A2D7 04 00 04 00      DB $04, $00, $04, $00, $04, $00, $08, $00
+ 735+ A2DB 04 00 08 00
+ 736+ A2DF 10 00 08 00      DB $10, $00, $08, $00, $04, $00, $02, $00
+ 736+ A2E3 04 00 02 00
+ 737+ A2E7 02 00 02 00      DB $02, $00, $02, $00, $04, $00, $08, $00
+ 737+ A2EB 04 00 08 00
+ 738+ A2EF 04 00 02 00      DB $04, $00, $02, $00, $01, $00, $01, $00
+ 738+ A2F3 01 00 01 00
+ 739+ A2F7 01 00 02 00      DB $01, $00, $02, $00, $04, $00, $02, $00
+ 739+ A2FB 04 00 02 00
+ 740+ A2FF 01 00 00 80      DB $01, $00, $00, $80, $00, $80, $00, $80
+ 740+ A303 00 80 00 80
+ 741+ A307 01 00 02 00      DB $01, $00, $02, $00, $01, $00, $00, $80
+ 741+ A30B 01 00 00 80
+ 742+ A30F 00 40 00 40      DB $00, $40, $00, $40, $00, $40, $00, $80
+ 742+ A313 00 40 00 80
+ 743+ A317 01 00 00 80      DB $01, $00, $00, $80, $00, $40, $00, $20
+ 743+ A31B 00 40 00 20
+ 744+ A31F 00 20 00 20      DB $00, $20, $00, $20, $00, $40, $00, $80
+ 744+ A323 00 40 00 80
+ 745+ A327 00 00 88 00      DB $00, $00, $88, $00, $50, $00, $20, $00
+ 745+ A32B 50 00 20 00
+ 746+ A32F 50 00 88 00      DB $50, $00, $88, $00, $00, $00, $00, $00
+ 746+ A333 00 00 00 00
+ 747+ A337 44 00 28 00      DB $44, $00, $28, $00, $10, $00, $28, $00
+ 747+ A33B 10 00 28 00
+ 748+ A33F 44 00 00 00      DB $44, $00, $00, $00, $00, $00, $22, $00
+ 748+ A343 00 00 22 00
+ 749+ A347 14 00 08 00      DB $14, $00, $08, $00, $14, $00, $22, $00
+ 749+ A34B 14 00 22 00
+ 750+ A34F 00 00 00 00      DB $00, $00, $00, $00, $11, $00, $0A, $00
+ 750+ A353 11 00 0A 00
+ 751+ A357 04 00 0A 00      DB $04, $00, $0A, $00, $11, $00, $00, $00
+ 751+ A35B 11 00 00 00
+ 752+ A35F 00 00 08 80      DB $00, $00, $08, $80, $05, $00, $02, $00
+ 752+ A363 05 00 02 00
+ 753+ A367 05 00 08 80      DB $05, $00, $08, $80, $00, $00, $00, $00
+ 753+ A36B 00 00 00 00
+ 754+ A36F 04 40 02 80      DB $04, $40, $02, $80, $01, $00, $02, $80
+ 754+ A373 01 00 02 80
+ 755+ A377 04 40 00 00      DB $04, $40, $00, $00, $00, $00, $02, $20
+ 755+ A37B 00 00 02 20
+ 756+ A37F 01 40 00 80      DB $01, $40, $00, $80, $01, $40, $02, $20
+ 756+ A383 01 40 02 20
+ 757+ A387 00 00 00 00      DB $00, $00, $00, $00, $01, $10, $00, $A0
+ 757+ A38B 01 10 00 A0
+ 758+ A38F 00 40 00 A0      DB $00, $40, $00, $A0, $01, $10, $00, $00
+ 758+ A393 01 10 00 00
+ 759+ A397
+# file closed: font6s.inc
+1481  A397                  INCLUDE "font6idx.inc"
+# file opened: font6idx.inc
+   1+ A397              ; font6idx.inc — ascii-$20 -> ci ($FF=absent)
+   2+ A397              FONT6IDX:
+   3+ A397 FF 29 FF 2D      DB $FF, $29, $FF, $2D, $2E, $2F, $FF, $2C
+   3+ A39B 2E 2F FF 2C
+   4+ A39F 33 34 FF 28      DB $33, $34, $FF, $28, $25, $27, $24, $2B
+   4+ A3A3 25 27 24 2B
+   5+ A3A7 1A 1B 1C 1D      DB $1A, $1B, $1C, $1D, $1E, $1F, $20, $21
+   5+ A3AB 1E 1F 20 21
+   6+ A3AF 22 23 26 FF      DB $22, $23, $26, $FF, $31, $32, $30, $2A
+   6+ A3B3 31 32 30 2A
+   7+ A3B7 FF 00 01 02      DB $FF, $00, $01, $02, $03, $04, $05, $06
+   7+ A3BB 03 04 05 06
+   8+ A3BF 07 08 09 0A      DB $07, $08, $09, $0A, $0B, $0C, $0D, $0E
+   8+ A3C3 0B 0C 0D 0E
+   9+ A3C7 0F 10 11 12      DB $0F, $10, $11, $12, $13, $14, $15, $16
+   9+ A3CB 13 14 15 16
+  10+ A3CF 17 18 19 FF      DB $17, $18, $19, $FF, $FF, $FF, $FF, $FF
+  10+ A3D3 FF FF FF FF
+  11+ A3D7 FF FF FF FF      DB $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+  11+ A3DB FF FF FF FF
+  12+ A3DF FF FF FF FF      DB $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+  12+ A3E3 FF FF FF FF
+  13+ A3E7 FF FF FF FF      DB $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+  13+ A3EB FF FF FF FF
+  14+ A3EF FF FF FF FF      DB $FF, $FF, $FF, $FF, $FF, $FF, $FF, $FF
+  14+ A3F3 FF FF FF FF
+  15+ A3F7
+# file closed: font6idx.inc
+1482  A3F7                  INCLUDE "font6ci.inc"
+# file opened: font6ci.inc
+   1+ A3F7              ; font6ci.inc — ci -> FONT6S+ci*112
+   2+ A3F7              FONT6CI:
+   3+ A3F7 F7 8B            DEFW FONT6S+$0000 ; ci 0 'A'
+   4+ A3F9 67 8C            DEFW FONT6S+$0070 ; ci 1 'B'
+   5+ A3FB D7 8C            DEFW FONT6S+$00E0 ; ci 2 'C'
+   6+ A3FD 47 8D            DEFW FONT6S+$0150 ; ci 3 'D'
+   7+ A3FF B7 8D            DEFW FONT6S+$01C0 ; ci 4 'E'
+   8+ A401 27 8E            DEFW FONT6S+$0230 ; ci 5 'F'
+   9+ A403 97 8E            DEFW FONT6S+$02A0 ; ci 6 'G'
+  10+ A405 07 8F            DEFW FONT6S+$0310 ; ci 7 'H'
+  11+ A407 77 8F            DEFW FONT6S+$0380 ; ci 8 'I'
+  12+ A409 E7 8F            DEFW FONT6S+$03F0 ; ci 9 'J'
+  13+ A40B 57 90            DEFW FONT6S+$0460 ; ci 10 'K'
+  14+ A40D C7 90            DEFW FONT6S+$04D0 ; ci 11 'L'
+  15+ A40F 37 91            DEFW FONT6S+$0540 ; ci 12 'M'
+  16+ A411 A7 91            DEFW FONT6S+$05B0 ; ci 13 'N'
+  17+ A413 17 92            DEFW FONT6S+$0620 ; ci 14 'O'
+  18+ A415 87 92            DEFW FONT6S+$0690 ; ci 15 'P'
+  19+ A417 F7 92            DEFW FONT6S+$0700 ; ci 16 'Q'
+  20+ A419 67 93            DEFW FONT6S+$0770 ; ci 17 'R'
+  21+ A41B D7 93            DEFW FONT6S+$07E0 ; ci 18 'S'
+  22+ A41D 47 94            DEFW FONT6S+$0850 ; ci 19 'T'
+  23+ A41F B7 94            DEFW FONT6S+$08C0 ; ci 20 'U'
+  24+ A421 27 95            DEFW FONT6S+$0930 ; ci 21 'V'
+  25+ A423 97 95            DEFW FONT6S+$09A0 ; ci 22 'W'
+  26+ A425 07 96            DEFW FONT6S+$0A10 ; ci 23 'X'
+  27+ A427 77 96            DEFW FONT6S+$0A80 ; ci 24 'Y'
+  28+ A429 E7 96            DEFW FONT6S+$0AF0 ; ci 25 'Z'
+  29+ A42B 57 97            DEFW FONT6S+$0B60 ; ci 26 '0'
+  30+ A42D C7 97            DEFW FONT6S+$0BD0 ; ci 27 '1'
+  31+ A42F 37 98            DEFW FONT6S+$0C40 ; ci 28 '2'
+  32+ A431 A7 98            DEFW FONT6S+$0CB0 ; ci 29 '3'
+  33+ A433 17 99            DEFW FONT6S+$0D20 ; ci 30 '4'
+  34+ A435 87 99            DEFW FONT6S+$0D90 ; ci 31 '5'
+  35+ A437 F7 99            DEFW FONT6S+$0E00 ; ci 32 '6'
+  36+ A439 67 9A            DEFW FONT6S+$0E70 ; ci 33 '7'
+  37+ A43B D7 9A            DEFW FONT6S+$0EE0 ; ci 34 '8'
+  38+ A43D 47 9B            DEFW FONT6S+$0F50 ; ci 35 '9'
+  39+ A43F B7 9B            DEFW FONT6S+$0FC0 ; ci 36 '.'
+  40+ A441 27 9C            DEFW FONT6S+$1030 ; ci 37 ','
+  41+ A443 97 9C            DEFW FONT6S+$10A0 ; ci 38 ':'
+  42+ A445 07 9D            DEFW FONT6S+$1110 ; ci 39 '-'
+  43+ A447 77 9D            DEFW FONT6S+$1180 ; ci 40 '+'
+  44+ A449 E7 9D            DEFW FONT6S+$11F0 ; ci 41 '!'
+  45+ A44B 57 9E            DEFW FONT6S+$1260 ; ci 42 '?'
+  46+ A44D C7 9E            DEFW FONT6S+$12D0 ; ci 43 '/'
+  47+ A44F 37 9F            DEFW FONT6S+$1340 ; ci 44 '''
+  48+ A451 A7 9F            DEFW FONT6S+$13B0 ; ci 45 '#'
+  49+ A453 17 A0            DEFW FONT6S+$1420 ; ci 46 '$'
+  50+ A455 87 A0            DEFW FONT6S+$1490 ; ci 47 '%'
+  51+ A457 F7 A0            DEFW FONT6S+$1500 ; ci 48 '>'
+  52+ A459 67 A1            DEFW FONT6S+$1570 ; ci 49 '<'
+  53+ A45B D7 A1            DEFW FONT6S+$15E0 ; ci 50 '='
+  54+ A45D 47 A2            DEFW FONT6S+$1650 ; ci 51 '('
+  55+ A45F B7 A2            DEFW FONT6S+$16C0 ; ci 52 ')'
+  56+ A461 27 A3            DEFW FONT6S+$1730 ; ci 53 '×'
+  57+ A463
+# file closed: font6ci.inc
+1483  A463                  INCLUDE "pband.inc"
+# file opened: pband.inc
+   1+ A463              ; PBAND 24 DEFW char-row byte-base ($4000 ULA: third<<11 | charRow<<5)
+   2+ A463              PBAND:
+   3+ A463 00 40            DEFW $4000  ; band 0
+   4+ A465 20 40            DEFW $4020  ; band 1
+   5+ A467 40 40            DEFW $4040  ; band 2
+   6+ A469 60 40            DEFW $4060  ; band 3
+   7+ A46B 80 40            DEFW $4080  ; band 4
+   8+ A46D A0 40            DEFW $40A0  ; band 5
+   9+ A46F C0 40            DEFW $40C0  ; band 6
+  10+ A471 E0 40            DEFW $40E0  ; band 7
+  11+ A473 00 48            DEFW $4800  ; band 8
+  12+ A475 20 48            DEFW $4820  ; band 9
+  13+ A477 40 48            DEFW $4840  ; band 10
+  14+ A479 60 48            DEFW $4860  ; band 11
+  15+ A47B 80 48            DEFW $4880  ; band 12
+  16+ A47D A0 48            DEFW $48A0  ; band 13
+  17+ A47F C0 48            DEFW $48C0  ; band 14
+  18+ A481 E0 48            DEFW $48E0  ; band 15
+  19+ A483 00 50            DEFW $5000  ; band 16
+  20+ A485 20 50            DEFW $5020  ; band 17
+  21+ A487 40 50            DEFW $5040  ; band 18
+  22+ A489 60 50            DEFW $5060  ; band 19
+  23+ A48B 80 50            DEFW $5080  ; band 20
+  24+ A48D A0 50            DEFW $50A0  ; band 21
+  25+ A48F C0 50            DEFW $50C0  ; band 22
+  26+ A491 E0 50            DEFW $50E0  ; band 23
+  27+ A493
+# file closed: pband.inc
+1484  A493 27 A3        FONT6X: DEFW FONT6S+$1730
+1485  A495                  SAVEBIN "/root/nerve-workspace/demos/balatro/boardtest.bin",$8000,ENDMARK-start
+1486  A495              ENDMARK:
+1487  A495
+# file closed: boardtest.zasm
