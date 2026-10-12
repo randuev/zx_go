@@ -97,15 +97,30 @@ func TestBalatroLayoutProof(t *testing.T) {
 	}
 	t.Logf("cmd strip lit cells=%d", lit)
 
+	// RAM decimal mirror of counters (punch-2 gate):
+	if h, d, an := balPeek(emu, syms["HANDS"]), balPeek(emu, syms["DISCS"]), balPeek(emu, syms["ANTE"]); h != 4 || d != 3 || an != 1 {
+		t.Fatalf("counters RAM HANDS=%d DISCS=%d ANTE=%d want 4/3/1", h, d, an)
+	}
+	if dk := 52 - balPeek(emu, syms["DECKPOS"]); dk < 1 || dk > 52 {
+		t.Fatalf("DECK=%d out of range", dk)
+	}
+	rnd := (balPeek(emu, syms["ANTE"])-1)*3 + balPeek(emu, syms["BLINDIDX"]) + 1
+	if balBCD3(emu, syms["TARGET"]) == 0 {
+		t.Fatal("TARGET bcd zero at proof time")
+	}
+	t.Logf("RAM mirror OK: 4/3/1 round=%d deck=%d", rnd, 52-balPeek(emu, syms["DECKPOS"]))
+
 	// ---- (c) rank glyph presence at each of the 5 hand slots
 	// hand cards live near bottom bands 17-21 per drawHand; find rank glyph
 	// ink by scanning each slot column window for a 5x7 ink cluster.
 	// slots at cells 11+2*s (8 slots); rank glyph at y=band17*8+PYOFF2,
 	// x=CBX*8+1 .. +6, rows y138..144 (rank top-left of cardCell).
+	slots := 0
 	for s := 0; s < 8; s++ {
 		if balPeek(emu, syms["HAND"]+uint16(s)) == 0 {
 			continue
 		}
+		slots++
 		cbx := 11 + 2*s
 		x0, x1 := cbx*8+1, cbx*8+7
 		rowsLit := 0
@@ -121,7 +136,7 @@ func TestBalatroLayoutProof(t *testing.T) {
 			t.Fatalf("slot %d (cell %d): rank glyph rows lit=%d want>=5", s, cbx, rowsLit)
 		}
 	}
-	t.Logf("rank glyphs present in all %d hand slots", 8)
+		t.Logf("rank glyphs present in all %d hand slots", slots)
 
 	// ---- (d) red suit ink > 0 with hearts/diamonds forced
 	// poke hand with hearts+diamonds and redraw via game's own redraw path:
