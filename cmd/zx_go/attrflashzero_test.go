@@ -9,9 +9,10 @@ import (
 )
 
 // TestAttrFlashZero : every attribute byte of boardtest and balatro after a
-// full render must have FLASH bit (0x40) CLEAR. Flash was accidentally armed
-// when ZX-standard encoding was adopted (non-spec bytes $70/$46/$47/$78/$7A
-// all carry bit 6). This gate fails loudly if any flash byte returns.
+// full render must have FLASH bit (0x80, ZX hardware standard: ink 2-0,
+// paper 5-3, bright bit 6, FLASH bit 7) CLEAR. The old core decoded bright
+// as bit 7, which hid our $B0/$B2… literals (true flash) as static bright.
+// This gate fails loudly if any flash byte returns.
 func TestAttrFlashZero(t *testing.T) {
 	run := func(t *testing.T, path string) map[uint16]uint16 {
 		bin, err := os.ReadFile(path)
@@ -48,7 +49,7 @@ func TestAttrFlashZero(t *testing.T) {
 		bad := map[uint16]uint16{}
 		for a := 0x5800; a < 0x5800+768; a++ {
 			v := balPeek(emu, uint16(a))
-			if v&0x40 != 0 {
+			if v&0x80 != 0 {
 				bad[uint16(a)] = uint16(v)
 			}
 		}
