@@ -13,6 +13,7 @@ const (
 	bMODE_SCORE = 2
 	bMODE_WON   = 3
 	bMODE_OVER  = 4
+	bMODE_ANN   = 5
 )
 
 // startGame boots to title then presses SPACE to begin a round.
@@ -62,6 +63,7 @@ func TestBalatroDealDeterministic(t *testing.T) {
 	emu := bootBalatro(t, syms)
 	balRunFrames(emu, 6)
 	pressOnce(t, emu, syms, "ENTER")
+	balToPlay(t, emu, syms)
 	balRunFrames(emu, 8)
 	if m := balPeek(emu, syms["MODE"]); m != bMODE_PLAY {
 		t.Fatalf("MODE=%d want PLAY", m)
@@ -252,8 +254,13 @@ func TestBalatroPlayFourKindWins(t *testing.T) {
 		t.Fatalf("NSEL=%d want 5", n)
 	}
 	pressOnce(t, emu, syms, "SPACE")
-	balToPlay(t, emu, syms)
+	if balPeek(emu, syms["MODE"]) == bMODE_ANN {
+		balToPlay(t, emu, syms)
+	}
 	// score animation may already be done inside the stroke; accept SCORE or WON
+	for i := 0; i < 200 && balPeek(emu, syms["MODE"]) == bMODE_SCORE; i++ {
+		balRunFrames(emu, 1)
+	}
 	if m := balPeek(emu, syms["MODE"]); m != bMODE_SCORE && m != bMODE_WON {
 		t.Fatalf("MODE=%d after play, want SCORE(2)/WON(3)", m)
 	}
@@ -291,6 +298,10 @@ func TestBalatroPlayFourKindWins(t *testing.T) {
 	if tg := balBCD3(emu, syms["BLINDIDX"]+0); tg == 0 {
 		_ = tg
 	}
+	if balPeek(emu, syms["MODE"]) == bMODE_ANN {
+		balToPlay(t, emu, syms)
+	}
+	balRunFrames(emu, 4)
 	if m := balPeek(emu, syms["MODE"]); m != bMODE_PLAY {
 		t.Fatalf("MODE=%d want PLAY after advance", m)
 	}
@@ -309,7 +320,11 @@ func TestBalatroGameOverRestart(t *testing.T) {
 	emu.mem.Write(syms["BLINDTAB"]+2, 0x99)
 	// recompute target: easiest — advanceBlind wraps so instead force via fresh round: poke SCOREV zero and play 4x weak
 	for round := 0; round < 4; round++ {
-		// force hand = distinct low cards (high card only): rank*? engine byte = suit<<4|rank
+		if m := balPeek(emu, syms["MODE"]); m == bMODE_OVER {
+			pressOnce(t, emu, syms, "SPACE") // overKey restart
+		}
+		balToPlay(t, emu, syms)
+		// force hand = distinct low cards (high card only): engine byte = suit<<4|rank
 		for i := 0; i < 8; i++ {
 			emu.mem.Write(syms["HAND"]+uint16(i), byte((i%4)*16+1+(i/4)))
 		}

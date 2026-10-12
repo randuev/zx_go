@@ -20,6 +20,7 @@ func TestBalatroCursorSelect2(t *testing.T) {
 	balRunFrames(emu, 6)
 	// start a round: title accepts SPACE (EV_PLAY) or ENTER (EV_SEL)
 	balPress(t, emu, syms, "SPACE")
+	balToPlay(t, emu, syms)
 	balRunFrames(emu, 4)
 	if m := balPeek(emu, syms["MODE"]); m != bMODE_PLAY {
 		t.Fatalf("MODE=%d after SPACE, want PLAY", m)

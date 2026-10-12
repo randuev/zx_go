@@ -165,13 +165,14 @@ func balShuffleReplay(seed uint16) []byte {
 // with the v3 presentation kernel: presses SPACE until MODE==PLAY.
 func balToPlay(t *testing.T, emu *emulator, syms map[string]uint16) {
 	t.Helper()
-	for i := 0; i < 200 && balPeek(emu, syms["MODE"]) != bMODE_PLAY; i++ {
-		if i%20 == 0 {
+	for i := 0; i < 400; i++ {
+		if balPeek(emu, syms["MODE"]) == bMODE_ANN {
 			pressOnce(t, emu, syms, "SPACE")
 		}
 		balRunFrames(emu, 1)
+		if balPeek(emu, syms["MODE"]) == bMODE_PLAY && balPeek(emu, syms["READY"]) == 1 {
+			return
+		}
 	}
-	if m := balPeek(emu, syms["MODE"]); m != bMODE_PLAY {
-		t.Fatalf("balToPlay: MODE=%d want PLAY", m)
-	}
+	t.Fatalf("balToPlay: MODE=%d READY=%d want PLAY+ready", balPeek(emu, syms["MODE"]), balPeek(emu, syms["READY"]))
 }
