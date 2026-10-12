@@ -100,7 +100,6 @@ func balPress(t *testing.T, emu *emulator, syms map[string]uint16, name string) 
 	pressOnce(t, emu, syms, name)
 }
 
-
 func balRunFrames(emu *emulator, n int) {
 	for i := 0; i < n; i++ {
 		runOneFrameHeadless(emu, roms.ModelPlus2)
@@ -124,7 +123,7 @@ func balBCD3(emu *emulator, a uint16) int {
 // balTextLit counts non-zero glyph bytes in one text char row (row 0..23).
 func balTextLit(emu *emulator, row int) int {
 	lit := 0
-	base := uint16(0x4000 + (row>>3)*0x800 + (row&7)*0x20)   // third stride $800, pixel-row $100 within third => char row
+	base := uint16(0x4000 + (row>>3)*0x800 + (row&7)*0x20) // third stride $800, pixel-row $100 within third => char row
 	for x := 0; x < 32; x++ {
 		if emu.mem.Read(base+uint16(x)) != 0 {
 			lit++
@@ -160,4 +159,19 @@ func balShuffleReplay(seed uint16) []byte {
 		deck[r], deck[k] = deck[k], deck[r]
 	}
 	return deck
+}
+
+// balToPlay advances past the round-announce splash (MODE_ANN) introduced
+// with the v3 presentation kernel: presses SPACE until MODE==PLAY.
+func balToPlay(t *testing.T, emu *emulator, syms map[string]uint16) {
+	t.Helper()
+	for i := 0; i < 200 && balPeek(emu, syms["MODE"]) != bMODE_PLAY; i++ {
+		if i%20 == 0 {
+			pressOnce(t, emu, syms, "SPACE")
+		}
+		balRunFrames(emu, 1)
+	}
+	if m := balPeek(emu, syms["MODE"]); m != bMODE_PLAY {
+		t.Fatalf("balToPlay: MODE=%d want PLAY", m)
+	}
 }

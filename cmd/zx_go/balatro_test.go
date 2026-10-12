@@ -27,6 +27,7 @@ func startGame(t *testing.T, syms map[string]uint16) (*emulator, uint16) {
 		t.Fatalf("title text sparse: lit=%d", lit)
 	}
 	pressOnce(t, emu, syms, "SPACE")
+	balToPlay(t, emu, syms)
 	balRunFrames(emu, 8)
 	if m := balPeek(emu, syms["MODE"]); m != bMODE_PLAY {
 		t.Fatalf("MODE=%d after SPACE, want PLAY(1)", m)
@@ -129,7 +130,7 @@ func TestBalatroDealDeterministic(t *testing.T) {
 		return dk
 	}
 	seed0 := balPeek(emu, syms["SEED"])
-	seed0b := balPeek(emu, syms["SEED"] + 1)
+	seed0b := balPeek(emu, syms["SEED"]+1)
 	dA := callShuffle()
 	// restore same seed -> same deck (deterministic)
 	emu.mem.Write(syms["SEED"], seed0)
@@ -203,9 +204,9 @@ func TestBalatroDiscard(t *testing.T) {
 	emu, _ := startGame(t, syms)
 	old0 := balPeek(emu, syms["HAND"])
 	old1 := balPeek(emu, syms["HAND"]+1)
-	pressOnce(t, emu, syms, "ENTER")           // select slot0
-	pressOnce(t, emu, syms, "6")               // cursor1
-	pressOnce(t, emu, syms, "ENTER")           // select slot1
+	pressOnce(t, emu, syms, "ENTER") // select slot0
+	pressOnce(t, emu, syms, "6")     // cursor1
+	pressOnce(t, emu, syms, "ENTER") // select slot1
 	pressOnce(t, emu, syms, "D")
 	balRunFrames(emu, 2)
 	if d := balPeek(emu, syms["DISCS"]); d != 2 {
@@ -235,6 +236,7 @@ func TestBalatroPlayFourKindWins(t *testing.T) {
 	emu := bootBalatro(t, syms)
 	balRunFrames(emu, 6)
 	pressOnce(t, emu, syms, "SPACE")
+	balToPlay(t, emu, syms)
 	balRunFrames(emu, 4)
 	// force hand = four aces + kicker: card = rank*16+suit (engine encoding)
 	for i := 0; i < 4; i++ {
@@ -250,6 +252,7 @@ func TestBalatroPlayFourKindWins(t *testing.T) {
 		t.Fatalf("NSEL=%d want 5", n)
 	}
 	pressOnce(t, emu, syms, "SPACE")
+	balToPlay(t, emu, syms)
 	// score animation may already be done inside the stroke; accept SCORE or WON
 	if m := balPeek(emu, syms["MODE"]); m != bMODE_SCORE && m != bMODE_WON {
 		t.Fatalf("MODE=%d after play, want SCORE(2)/WON(3)", m)
@@ -298,6 +301,7 @@ func TestBalatroGameOverRestart(t *testing.T) {
 	emu := bootBalatro(t, syms)
 	balRunFrames(emu, 6)
 	pressOnce(t, emu, syms, "SPACE")
+	balToPlay(t, emu, syms)
 	balRunFrames(emu, 4)
 	// make target unbeatable then play four weak hands
 	emu.mem.Write(syms["BLINDTAB"]+0, 0x99)
@@ -321,6 +325,7 @@ func TestBalatroGameOverRestart(t *testing.T) {
 		}
 	}
 	pressOnce(t, emu, syms, "SPACE") // overKey restart
+	balToPlay(t, emu, syms)
 	balRunFrames(emu, 4)
 	if a := balPeek(emu, syms["ANTE"]); a != 1 {
 		t.Fatalf("ANTE=%d want 1 after restart", a)
@@ -341,6 +346,7 @@ func TestBalatroQuitClean(t *testing.T) {
 	emu := bootBalatro(t, syms)
 	balRunFrames(emu, 6)
 	pressOnce(t, emu, syms, "SPACE")
+	balToPlay(t, emu, syms)
 	balRunFrames(emu, 4)
 	pressOnce(t, emu, syms, "Q")
 	pc := emu.cpu.PC
