@@ -19,7 +19,7 @@ const (
 func startGame(t *testing.T, syms map[string]uint16) (*emulator, uint16) {
 	t.Helper()
 	emu := bootBalatro(t, syms)
-	balRunFrames(emu, 8)
+	balRunFrames(emu, 16)
 	if m := balPeek(emu, syms["MODE"]); m != bMODE_TITLE {
 		t.Fatalf("MODE=%d at boot, want TITLE(0)", m)
 	}
@@ -27,7 +27,7 @@ func startGame(t *testing.T, syms map[string]uint16) (*emulator, uint16) {
 		t.Fatalf("title text sparse: lit=%d", lit)
 	}
 	pressOnce(t, emu, syms, "SPACE")
-	balRunFrames(emu, 4)
+	balRunFrames(emu, 8)
 	if m := balPeek(emu, syms["MODE"]); m != bMODE_PLAY {
 		t.Fatalf("MODE=%d after SPACE, want PLAY(1)", m)
 	}
@@ -37,7 +37,7 @@ func startGame(t *testing.T, syms map[string]uint16) (*emulator, uint16) {
 func TestBalatroBootTitle(t *testing.T) {
 	syms := loadBalatroSyms(t)
 	emu := bootBalatro(t, syms)
-	balRunFrames(emu, 8)
+	balRunFrames(emu, 16)
 	if pc := emu.cpu.PC; pc < 0x8000 || pc > 0xBFFF {
 		t.Fatalf("PC=$%04X outside code block — demo not running", pc)
 	}
@@ -254,7 +254,9 @@ func TestBalatroPlayFourKindWins(t *testing.T) {
 	if m := balPeek(emu, syms["MODE"]); m != bMODE_SCORE && m != bMODE_WON {
 		t.Fatalf("MODE=%d after play, want SCORE(2)/WON(3)", m)
 	}
-	balRunFrames(emu, 40)
+	for i := 0; i < 200 && balPeek(emu, syms["MODE"]) != bMODE_WON; i++ {
+		balRunFrames(emu, 1)
+	}
 	if ht := balPeek(emu, syms["HTIDX"]); ht != 7 {
 		t.Fatalf("HTIDX=%d want 7 (four kind)", ht)
 	}
@@ -311,7 +313,9 @@ func TestBalatroGameOverRestart(t *testing.T) {
 		pressOnce(t, emu, syms, "6")
 		pressOnce(t, emu, syms, "ENTER")
 		pressOnce(t, emu, syms, "SPACE") // play pair of 2s
-		balRunFrames(emu, 40)
+		for i := 0; i < 200 && balPeek(emu, syms["MODE"]) != bMODE_OVER; i++ {
+			balRunFrames(emu, 1)
+		}
 		if m := balPeek(emu, syms["MODE"]); m != bMODE_OVER {
 			t.Fatalf("round %d MODE=%d want OVER(4) vs 999999", round, m)
 		}

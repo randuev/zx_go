@@ -64,7 +64,7 @@ func TestBalatroAY(t *testing.T) {
 		stroke("ENTER", 20000) // select: sfxSelect
 		stroke("6", 20000)
 	}
-	stroke("SPACE", 600000) // play: sfxPlay + score blips
+	stroke("SPACE", 4000000) // play: sfxPlay + score blips (heavy pixel kernel needs longer tail)
 	fmt.Printf("sfxMon=%v MODE=%d TOT=%d\n", mon, balPeek(emu, syms["MODE"]), balBCD3(emu, syms["TOT"]))
 	if mon["sfxDeal"] == 0 {
 		t.Error("sfxDeal never fired")

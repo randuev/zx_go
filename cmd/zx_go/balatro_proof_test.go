@@ -31,7 +31,7 @@ func TestBalatroProof(t *testing.T) {
 		f.Close()
 		fmt.Printf("proof: %s MODE=%d PC=%04X\n", name, balPeek(emu, syms["MODE"]), emu.cpu.PC)
 	}
-	balRunFrames(emu, 6)
+	balRunFrames(emu, 16)
 	save("01-title.png")
 	// dump first 3 sheets (ci 0,1,2) rows to verify sheet order
 	for ci2 := range 3 {
@@ -120,7 +120,7 @@ func TestBalatroProof(t *testing.T) {
 		emu.cpu.StepInstructionWithIRQ()
 	}
 	save("05-score-mid.png")
-	for i := 0; i < 60 && balPeek(emu, syms["MODE"]) != bMODE_WON; i++ {
+	for i := 0; i < 200 && balPeek(emu, syms["MODE"]) != bMODE_WON; i++ {
 		balRunFrames(emu, 1)
 	}
 	hl := ""
