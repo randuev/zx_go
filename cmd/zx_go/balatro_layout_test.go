@@ -83,7 +83,7 @@ func TestBalatroLayoutProof(t *testing.T) {
 	for row := 0; row <= 16; row++ {
 		for col := 11; col < 32; col++ {
 			cells++
-			if a := balPeek(emu, attBase+uint16(row*32+col)); (a>>3)&7 == 2 {
+			if a := balPeek(emu, attBase+uint16(row*32+col)); (a>>3)&7 == 4 { // paper bits 5-3, green=4 (standard layout)
 				green++
 			}
 		}
