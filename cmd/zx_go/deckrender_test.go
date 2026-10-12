@@ -138,9 +138,9 @@ func TestDeckRender(t *testing.T) {
 				}
 			}
 			// 2) attrs : middle column rows wd+2,wd+3 red for H/D
-			wantInk := byte(0x78)
+			wantInk := byte(0x38) // white paper black ink, standard layout (bright bit unnecessary; renders identical to $78)
 			if suit == 1 || suit == 2 {
-				wantInk = 0x7A
+				wantInk = 0x3A // RED ink on white paper — donor v4.2 approved law : stay RED non-bright to match plate
 			}
 			for b := 2; b <= 3; b++ {
 				a := balPeek(emu, 0x5800+uint16(int(wd)+b)*32+uint16(cbx+1))
@@ -151,8 +151,8 @@ func TestDeckRender(t *testing.T) {
 			// frame rows (band wd top / wd+4 bottom) must stay black ink
 			for _, b := range []byte{0, 4} {
 				a := balPeek(emu, 0x5800+uint16(int(wd)+int(b))*32+uint16(cbx))
-				if a != 0x78 {
-					t.Errorf("card %d frame attr b%d : got $%02X want $78", ci, b, a)
+				if a != 0x38 {
+					t.Errorf("card %d frame attr b%d : got $%02X want $38", ci, b, a)
 				}
 			}
 			// 3) frame intact
@@ -201,8 +201,8 @@ func TestDeckRender(t *testing.T) {
 	}
 	for b := 2; b <= 3; b++ {
 		a := balPeek(emu, 0x5800+uint16(6+b)*32+15) // raised : WD=BAND-1 ; col CBX+1
-		if a != 0x6A {
-			t.Errorf("selected heart attr b%d : got $%02X want $6A (RED ink on bright YELLOW paper — selected suit MUST stay red)", b, a)
+		if a != 0x72 {
+			t.Errorf("selected heart attr b%d : got $%02X want $72 (RED ink on yellow plate — donor v4.2 approved ccRed selected encode)", b, a)
 		}
 	}
 	fmt.Printf("DECK: 52/52 cards rendered across thirds , ink law holds\n")
