@@ -1,7 +1,6 @@
 package main
 
 import (
-	"image/png"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -110,16 +109,10 @@ func runSAMHeadless(f *cliFlags) {
 	}
 	slog.Info("sam: ran headless", "frames", frames, "pc", emu.sam.CPU.PC, "mode", emu.sam.Mem.ScreenMode())
 	if f.saveScreen != "" {
-		out, err := os.Create(f.saveScreen)
-		if err != nil {
-			slog.Error("sam: cannot create screenshot", "err", err)
-			os.Exit(1)
-		}
-		defer func() { _ = out.Close() }()
-		if err := png.Encode(out, emu.lastFrame()); err != nil {
-			slog.Error("sam: screenshot encode failed", "err", err)
-			os.Exit(1)
-		}
+		if err := savePNGAtomic(f.saveScreen, emu.lastFrame()); err != nil {
+		slog.Error("sam: screenshot save failed", "err", err)
+		os.Exit(1)
+	}
 		slog.Info("sam: wrote screenshot", "path", f.saveScreen)
 	}
 }

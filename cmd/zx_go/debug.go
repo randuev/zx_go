@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"fmt"
-	"image/png"
 	"log/slog"
 	"os"
 	"strconv"
@@ -450,15 +449,9 @@ func (sc *snapshotConfig) emit() {
 	if sc.saveScreens {
 		path := fmt.Sprintf("%s%06d.png", sc.prefix, sc.frameIdx)
 		img := emu.ula.LastFrame()
-		fp, err := os.Create(path)
-		if err != nil {
-			slog.Warn("snapshot.screen: create failed", "path", path, "err", err)
-			return
+		if err := savePNGAtomic(path, img); err != nil {
+			slog.Warn("snapshot.screen: save failed", "path", path, "err", err)
 		}
-		if err := png.Encode(fp, img); err != nil {
-			slog.Warn("snapshot.screen: encode failed", "path", path, "err", err)
-		}
-		_ = fp.Close()
 	}
 }
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"image"
 	"fmt"
 	"github.com/conorarmstrong/zx_go/pkg/next/divmmc"
 	"image/png"
@@ -611,12 +612,10 @@ func runHeadless(f *cliFlags) {
 						return
 					}
 					p := fmt.Sprintf("%s/nav-%05d-%s.png", dir, i, tag)
-					fp, err := os.Create(p)
-					if err != nil {
+					if err := savePNGAtomic(p, emu.lastFrame()); err != nil {
+						slog.Error("nav shot save", "path", p, "err", err)
 						return
 					}
-					_ = png.Encode(fp, emu.lastFrame())
-					_ = fp.Close()
 					slog.Info("nav shot", "path", p, "cursor", cur)
 				}
 				if i%40 == 0 {
@@ -828,11 +827,11 @@ func runHeadless(f *cliFlags) {
 								"nr4a_fb", nrf(0x4A), "nr68_ulactl", nrf(0x68))
 							if dir := os.Getenv("ZX_GO_NAV_SHOTS"); dir != "" {
 								p := fmt.Sprintf("%s/postlaunch-%05d.png", dir, i)
-								if fp, err := os.Create(p); err == nil {
-									_ = png.Encode(fp, emu.lastFrame())
-									_ = fp.Close()
-									slog.Info("POSTLAUNCH shot", "path", p)
-								}
+								if err := savePNGAtomic(p, emu.lastFrame()); err == nil {
+								slog.Info("POSTLAUNCH shot", "path", p)
+							} else {
+								slog.Error("POSTLAUNCH shot save", "path", p, "err", err)
+							}
 							}
 							os.Exit(0)
 						}
@@ -1036,17 +1035,10 @@ func runHeadless(f *cliFlags) {
 
 	if f.saveScreen != "" {
 		img := emu.lastFrame()
-		fp, err := os.Create(f.saveScreen)
-		if err != nil {
-			slog.Error("save-screen: create", "path", f.saveScreen, "err", err)
-			os.Exit(1)
-		}
-		if err := png.Encode(fp, img); err != nil {
-			slog.Error("save-screen: encode", "path", f.saveScreen, "err", err)
-			_ = fp.Close()
-			os.Exit(1)
-		}
-		_ = fp.Close()
+		if err := savePNGAtomic(f.saveScreen, img); err != nil {
+		slog.Error("save-screen", "path", f.saveScreen, "err", err)
+		os.Exit(1)
+	}
 		slog.Info("screenshot saved", "path", f.saveScreen)
 	}
 }
@@ -1071,4 +1063,32 @@ func runOneFrameHeadless(emu *emulator, model roms.SpectrumModel) {
 	for emu.cpu.Tstates() < target {
 		emu.cpu.StepInstructionWithIRQ()
 	}
+}
+
+// savePNGAtomic encodes img to path via a temp file in the SAME directory,
+// fsyncs, then renames. Rename is atomic within a filesystem, so a reader
+// (e.g. an agent Reading the proof screenshot right after capture) can
+// never observe a partially-written PNG — truncated rasters corrupted whole
+// Claude sessions once.
+func savePNGAtomic(path string, img image.Image) error {
+	tmp := path + ".tmp"
+	fp, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	if err := png.Encode(fp, img); err != nil {
+		_ = fp.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := fp.Sync(); err != nil {
+		_ = fp.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := fp.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
 }
