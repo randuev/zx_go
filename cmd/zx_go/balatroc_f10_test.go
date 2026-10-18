@@ -56,12 +56,12 @@ func TestBalatrocF10ShopPlus2(t *testing.T) {
 		emu.mem.Write(0x6000+uint16(i), v)
 	}
 	const shopScreen = 0xA47E
-	const shopID = 0xFA46
-	const shopSold = 0xFA56
-	const shopCost = 0xFA48
-	const shopCur = 0xFA58
-	const bank = 0xF7F3
-	const jok = 0xFA3D
+	const shopID = 0xFA53
+	const shopSold = 0xFA63
+	const shopCost = 0xFA55
+	const shopCur = 0xFA65
+	const bank = 0xF800
+	const jok = 0xFA4A
 	// enter shop_screen with a fresh sentinel return
 	emu.mem.Write(0x7D00, 0x76)
 	emu.cpu.SP = 0xFF56

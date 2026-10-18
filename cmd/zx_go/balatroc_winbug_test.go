@@ -47,13 +47,13 @@ func TestBalatrocWinBugPlus2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newEmulator: %v", err)
 	}
-	const score = 0xFA0C
-	const tgt = 0xF7E3
-	const msg = 0xF84E
-	const handsL = 0xF61B
-	const ante = 0xF61D
-	const blind = 0xF84D
-	const STRWIN = 0xDABD
+	const score = 0xFA19
+	const tgt = 0xF7F0
+	const msg = 0xFA22
+	const handsL = 0xF7EC
+	const ante = 0xF7EE
+	const blind = 0xFA21
+	const STRWIN = 0xDACA
 	rd16 := func(a uint16) uint32 {
 		return uint32(emu.mem.Read(a)) | uint32(emu.mem.Read(a+1))<<8 |
 			uint32(emu.mem.Read(a+2))<<16 | uint32(emu.mem.Read(a+3))<<24
@@ -126,18 +126,18 @@ func TestBalatrocWinBugPlus2(t *testing.T) {
 	sel := func() string {
 		s := ""
 		for i := 0; i < 8; i++ {
-			s += fmt.Sprintf("%02X", emu.mem.Read(0xF9F9+uint16(i)))
+			s += fmt.Sprintf("%02X", emu.mem.Read(0xFA06+uint16(i)))
 		}
 		return s
 	}
 	for i := 0; i < 3; i++ {
 		stroke(4, 0x04, 40)
 		fmt.Printf("after RIGHT%d: cursor=%d msg=$%04X PC=$%04X\n",
-			i, emu.mem.Read(0xFA0A),
+			i, emu.mem.Read(0xFA17),
 			uint16(emu.mem.Read(msg))|uint16(emu.mem.Read(msg+1))<<8, emu.cpu.PC)
 	}
 	stroke(4, 0x08, 40) // exactly ONE SEL: cursor stays on a card
-	fmt.Printf("selected=%s cursor=%d\n", sel(), emu.mem.Read(0xFA0A))
+	fmt.Printf("selected=%s cursor=%d\n", sel(), emu.mem.Read(0xFA17))
 	scoreWr = scoreWr[:0] // ignore pre-play banks
 	// PLAY and watch the check region frame by frame
 	emu.kbd.PressMatrixKey(4, 0x01, true)

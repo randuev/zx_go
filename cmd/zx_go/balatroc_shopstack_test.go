@@ -49,12 +49,12 @@ func TestBalatrocShopStackPlus2(t *testing.T) {
 		t.Fatalf("newEmulator: %v", err)
 	}
 	const shopScreen = 0xA47E
-	const shopID = 0xFA0D
-	const shopSold = 0xFA1D
-	const shopCost = 0xFA0F
-	const shopCur = 0xFA1F
-	const bank = 0xF7F3
-	const jok = 0xFA3D
+	const shopID = 0xFA53
+	const shopSold = 0xFA63
+	const shopCost = 0xFA55
+	const shopCur = 0xFA65
+	const bank = 0xF800
+	const jok = 0xFA4A
 	emu.paused.Store(false)
 	for i := 0; i < 220; i++ {
 		runOneFrameHeadless(emu, roms.ModelPlus2)

@@ -4,7 +4,7 @@ package main
 // non stop in store as well". LAW: PT3 tempo = ONE pattern row (quark)
 // per 50 Hz frame. This test stands the shop screen up (real tape, no
 // keys) and counts quarks per frame via a pre-fetch hook on _q_doquark
-// ($D49D, pass-46b map). PASS = avg quarks/frame within [0.8,1.1] and
+// ($D4AA, pass-46b map). PASS = avg quarks/frame within [0.8,1.1] and
 // no frame with >2 quarks. Hardware runs the identical instruction stream
 // at 3.5 MHz, so headless quarks/frame IS the hardware tempo.
 
@@ -63,7 +63,7 @@ func TestBalatrocShopQuarkTempoPlus2(t *testing.T) {
 	emu.cpu.IM = 1
 	q := 0
 	// dump burn code bytes once loaded
-	for pc := uint16(0xD49D); pc < 0xD4C5; pc += 8 {
+	for pc := uint16(0xD4AA); pc < 0xD4D2; pc += 8 {
 		fmt.Printf("burn $%04X:", pc)
 		for j := 0; j < 8; j++ {
 			fmt.Printf(" %02X", emu.mem.Read(uint16(pc+uint16(j))))
@@ -71,7 +71,7 @@ func TestBalatrocShopQuarkTempoPlus2(t *testing.T) {
 		fmt.Println()
 	}
 	emu.cpu.AddPreFetchHook("quark", func(pc uint16) {
-		if pc == 0xD49D {
+		if pc == 0xD4AA {
 			q++
 		}
 	})
