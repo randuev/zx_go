@@ -55,13 +55,13 @@ func TestBalatrocF10ShopPlus2(t *testing.T) {
 	for i, v := range musicData {
 		emu.mem.Write(0x6000+uint16(i), v)
 	}
-	const shopScreen = 0xA377
-	const shopID = 0xF87F
-	const shopSold = 0xF88F
-	const shopCost = 0xF881
-	const shopCur = 0xF891
-	const bank = 0xF62F
-	const jok = 0xF876
+	const shopScreen = 0xA47E
+	const shopID = 0xFA46
+	const shopSold = 0xFA56
+	const shopCost = 0xFA48
+	const shopCur = 0xFA58
+	const bank = 0xF7F3
+	const jok = 0xFA3D
 	// enter shop_screen with a fresh sentinel return
 	emu.mem.Write(0x7D00, 0x76)
 	emu.cpu.SP = 0xFF56
