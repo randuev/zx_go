@@ -58,7 +58,7 @@ func TestBalatrocMusicSustainPlus2(t *testing.T) {
 	emu.cpu.D, emu.cpu.E, emu.cpu.H, emu.cpu.L = 0, 0, 0x80, 0x00
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
-	q := func() int { return int(emu.mem.Read(0xFCD1)) | int(emu.mem.Read(0xFCD2))<<8 }
+	q := func() int { return int(emu.mem.Read(0xFCD4)) }
 	runF := func(n int) {
 		for i := 0; i < n; i++ {
 			runOneFrameHeadless(emu, roms.ModelPlus2)
@@ -74,22 +74,26 @@ func TestBalatrocMusicSustainPlus2(t *testing.T) {
 	watch := func(name string, frames int) {
 		q0 := q()
 		runF(frames)
-		d := q() - q0
+		// qctr is a BYTE odometer (wraps every 256 quarks) — compare mod-256
+		d := (q()-q0 + 256) % 256
 		fmt.Printf("SUSTAIN %-14s quarks=%d/%df\n", name, d, frames)
 		if d <= 0 {
 			t.Fatalf("MUSIC FROZEN during %s: qctr %d dead for %d frames — busy/redraw loop starves the player", name, q0, frames)
 		}
 	}
 	watch("title", 120)
-	stroke(4, 0x01, 4) // START
+	stroke(4, 0x01, 40) // START (PLAY-bound key = the title's START)
 	watch("after-start-deal", 90)
-	stroke(2, 0x08, 4) // RIGHT — deal card (paint storm)
+	stroke(4, 0x04, 40) // RIGHT — cursor walk (paint storm)
 	watch("select-right", 60)
-	stroke(4, 0x01, 4) // SEL
+	stroke(4, 0x08, 40) // SEL — select card 1
 	watch("select-card", 60)
-	stroke(4, 0x01, 4) // SEL second card
+	stroke(4, 0x08, 40) // SEL — deselect, RESELECT moves cursor on
+	stroke(4, 0x04, 40) // RIGHT to next card
+	stroke(4, 0x08, 40) // SEL — select card 2
 	watch("select-2", 60)
-	stroke(1, 0x01, 4) // PLAY key row? use PLAY binding row 1 bit0
+	stroke(4, 0x01, 40) // PLAY -> score tally
 	watch("play-tally", 150)
+	watch("post-tally", 120)
 	fmt.Println("SUSTAIN PASS: heartbeat alive through every redraw phase")
 }

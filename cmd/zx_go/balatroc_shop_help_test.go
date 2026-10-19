@@ -9,8 +9,8 @@ package main
 // caller frame restarts the machine (Seva's "just restarts to basic").
 // Shop entry is confirmed by sampling PC inside the shop span (the shop
 // repaint+poll lives there); paint and offer ids prove it further.
-// Constants: board.map of tap c9827c58… (_tgt=$FCA4 _shop_id=$FF14
-// _shop_cost=$FF16 _shop_sold=$FF24 _shop_cur=$FF26 _bank=$FCB4 _qctr=$FCD1).
+// Constants: board.map of tap c9827c58… (_tgt=$0xfca7 _shop_id=$0xff17
+// _shop_cost=$0xff19 _shop_sold=$0xff27 _shop_cur=$0xff29 _bank=$0xfcb7 _qctr=$0xfcd4).
 
 import (
 	"fmt"
@@ -102,16 +102,16 @@ func balToShop(t *testing.T, rounds int) *emulator {
 	for r := 0; r < rounds; r++ {
 		runF(140) // deal + compute_target settle
 		for j := 0; j < 4; j++ { // poke tgt=1 — any scoring hand wins
-			emu.mem.Write(0xFCA4+uint16(j), 0)
+			emu.mem.Write(0xfca7+uint16(j), 0)
 		}
-		emu.mem.Write(0xFCA4, 1)
+		emu.mem.Write(0xfca7, 1)
 		balStroke(emu, runF, 4, 0x08, 60) // SEL the cursor card
-		bank0 := emu.mem.Read(0xFCB4)
+		bank0 := emu.mem.Read(0xfcb7)
 		won := false
 		balStroke(emu, runF, 4, 0x01, 150) // PLAY -> score_anim -> tally
 		for i := 0; i < 900 && !won; i++ {
 			runOneFrameHeadless(emu, roms.ModelPlus2)
-			if emu.mem.Read(0xFCB4) != bank0 {
+			if emu.mem.Read(0xfcb7) != bank0 {
 				won = true // WIN PAYOUT banked — shop follows the banner
 			}
 			if i%150 == 149 {
@@ -120,8 +120,8 @@ func balToShop(t *testing.T, rounds int) *emulator {
 		}
 		if !won {
 			fmt.Printf("shopretry %d: ante=%d hands_l=%d tgt=%d bank=%d PC=$%04X\n",
-				r, emu.mem.Read(0xFCA2), emu.mem.Read(0xFCA0), rd(0xFCA4),
-				emu.mem.Read(0xFCB4), emu.cpu.PC)
+				r, emu.mem.Read(0xfca5), emu.mem.Read(0xfca3), rd(0xfca7),
+				emu.mem.Read(0xfcb7), emu.cpu.PC)
 			runF(400)
 			continue
 		}

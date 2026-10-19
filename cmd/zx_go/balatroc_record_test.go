@@ -65,7 +65,7 @@ func TestBalatrocIdleTempoPlus2(t *testing.T) {
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
 	// full frames incl. Pump? record path irrelevant; just count quark per frame at TITLE
-	q := func() int { return int(emu.mem.Read(0xFCD2)) | int(emu.mem.Read(0xFCD3))<<8 }
+	q := func() int { return int(emu.mem.Read(0xFCD2)) | int(emu.mem.Read(0xfcd6))<<8 }
 	runF := func(n int) { for i := 0; i < n; i++ { runOneFrameHeadless(emu, roms.ModelPlus2) } }
 	runF(120)
 	q0 := q()
@@ -136,7 +136,7 @@ func TestBalatrocRecordSoundsPlus2(t *testing.T) {
 		}
 	}
 	ph := func(tag string) {
-		qc := uint16(emu.mem.Read(0xFCD2)) | uint16(emu.mem.Read(0xFCD3))<<8
+		qc := uint16(emu.mem.Read(0xFCD2)) | uint16(emu.mem.Read(0xfcd6))<<8
 		sc := int32(uint(emu.mem.Read(0xFEDD)) | uint(emu.mem.Read(0xFEDE))<<8 |
 			uint(emu.mem.Read(0xFEDF))<<16 | uint(emu.mem.Read(0xFEE0))<<24)
 		fmt.Printf("PHASE %-22s PC=$%04X SP=$%04X halted=%v qctr=%d score=%d\n",

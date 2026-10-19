@@ -16,6 +16,7 @@ import (
 
 func trimName(s string) string { return strings.TrimRight(s, " ") }
 
+
 func TestBalatrocStormPlus2(t *testing.T) {
 	if os.Getenv("STORM") == "" {
 		t.Skip("set STORM=1")
@@ -54,8 +55,8 @@ func TestBalatrocStormPlus2(t *testing.T) {
 	var wrS [][2]uint16
 	emu.mem.SetAllWriteHook(func(addr uint16, val byte) {
 		pc := emu.cpu.PC
-		if pc == 0xD348 || pc == 0xD349 {
-			return // legit sentinel stores by _music_tick
+		if pc >= 0xD62A && pc <= 0xD680 {
+			return // legit stores inside _tick ($D62A, pass-48g)
 		}
 		if addr >= 0xC000 && addr <= 0xFFF7 && (val == 0x65 || val == 0x6D) {
 			other := uint16(0)
@@ -84,13 +85,6 @@ func TestBalatrocStormPlus2(t *testing.T) {
 	}
 	for i, v := range boardData {
 		emu.mem.Write(boardAddr+uint16(i), v)
-	}
-	mu, err := os.ReadFile("/root/nerve-workspace/demos/balatroc-c/build/music.bin")
-	if err != nil {
-		t.Fatalf("read music: %v", err)
-	}
-	for i, v := range mu {
-		emu.mem.Write(0x6000+uint16(i), v)
 	}
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
@@ -142,15 +136,16 @@ func TestBalatrocStormPlus2(t *testing.T) {
 			fmt.Printf("SCRATCH-WRITES n=%d first pc=$%04X\n", len(wrS), wrS[0][0])
 			wrS = wrS[:0]
 		}
-		if emu.cpu.PC == 0xC261 || emu.cpu.PC == 0xC267 || emu.cpu.PC == 0xD32B {
-			name := map[uint16]string{0xC261: "key_capture@C261", 0xC267: "key_capture@C267", 0xD32B: "music_tick@D32B"}
+		if (emu.cpu.PC >= 0xC4AE && emu.cpu.PC <= 0xC4C0) || emu.cpu.PC == 0xD62A || emu.cpu.PC == 0xD62B {
+			name := fmt.Sprintf("WATCH@%04X", emu.cpu.PC)
+			_ = map[uint16]string{}
 			fmt.Printf("MUS-CALL %s sp=$%04X IX=$%04X canary=%02X%02X d0=%02X d1=%02X sp+2=%02X%02X\n",
-				name[emu.cpu.PC], emu.cpu.SP, emu.cpu.IX,
-				emu.mem.Read(0xC260), emu.mem.Read(0xC261),
-				emu.mem.Read(0xC262), emu.mem.Read(0xC263),
+				name, emu.cpu.SP, emu.cpu.IX,
+				emu.mem.Read(0xC4AE), emu.mem.Read(0xC4AF),
+				emu.mem.Read(0xC4B0), emu.mem.Read(0xC4B1),
 				emu.mem.Read(emu.cpu.SP+2), emu.mem.Read(emu.cpu.SP+3))
 		}
-		if emu.cpu.PC == 0xC264 {
+		if emu.cpu.PC == 0xD5FB {
 			fmt.Printf("C264-WATCH sp=$%04X A=$%02X BC=$%04X HL=$%04X DE=$%04X IX=$%04X IY=$%04X ret@sp=%02X %02X sp-2=%02X %02X sp+2=%02X %02X\n",
 				emu.cpu.SP, emu.cpu.A, emu.cpu.BC(), emu.cpu.HL(), emu.cpu.DE(), emu.cpu.IX, emu.cpu.IY,
 				emu.mem.Read(emu.cpu.SP), emu.mem.Read(emu.cpu.SP+1),

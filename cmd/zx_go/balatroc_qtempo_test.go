@@ -13,8 +13,8 @@ package main
 // LAW: quark delta / frame delta >= 0.90 through EVERY phase. A poll
 // player fails this at DEAL/SHOP; an ISR player cannot (hardware fact).
 // Harness constants from board.map of tap 888f1d46…:
-// _qctr=$FCD2 _mptr=$FCCD _music_boot=$D588 _shop_screen=$A494
-// _shuffle=$B100 _deal=$B170 _tgt=$FCA5 _score=$FEDD.
+// _qctr=$FCD2 _mptr=$FCCD _music_boot=$0xd58a _shop_screen=$0xa496
+// _shuffle=$0xb102 _deal=$0xb172 _tgt=$FCA5 _score=$FEDD.
 
 import (
 	"fmt"
@@ -54,11 +54,11 @@ func TestBalatrocQTempoPlus2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newEmulator: %v", err)
 	}
-	const qctr = 0xFCD1
-	const musicBoot = 0xD588
-	const shopScreen = 0xA494
-	const shuffle = 0xB100
-	const deal = 0xB170
+	const qctr = 0xfcd4
+	const musicBoot = 0xd58a
+	const shopScreen = 0xa496
+	const shuffle = 0xb102
+	const deal = 0xb172
 	emu.paused.Store(false)
 	for i := 0; i < 200; i++ {
 		runOneFrameHeadless(emu, roms.ModelPlus2)
@@ -125,7 +125,7 @@ func TestBalatrocQTempoPlus2(t *testing.T) {
 		return r
 	}
 	// IDLE: main poll loop (light repaint steady state)
-	phase("main", 0xAB4B, 100)
+	phase("main", 0xab4d, 100)
 	// DEAL: shuffle + deal repaint through the real game path
 	phase("deal", deal, 100)
 	// SHOP: shop_screen entry + animation frames

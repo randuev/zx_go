@@ -44,9 +44,9 @@ func TestBalatrocBoot48fPlus2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const musicBoot = 0xD588
-	const isr = 0xD5F9
-	const qctr = 0xFCD1
+	const musicBoot = 0xd58a
+	const isr = 0xd5fb
+	const qctr = 0xfcd4
 	const vectab = 0x5B00
 	emu.paused.Store(false)
 	for i := 0; i < 200; i++ {
