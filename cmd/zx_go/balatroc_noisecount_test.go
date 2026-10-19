@@ -3,14 +3,14 @@ package main
 // balatroc_noisecount_test.go — SEVA 2026-10-18: "noise is still playing
 // non stop in store as well". LAW: PT3 tempo = ONE pattern row (quark)
 // per 50 Hz frame. Pass-48g REBASE: quarks are no longer pumped by any
-// caller — _isr (_tick=$0xd62a) is entered by hardware vsync at exactly
+// caller — _isr (_tick=$0xd6a0) is entered by hardware vsync at exactly
 // 50 Hz once IM2 is installed by _main before the title. This gate boots
 // through crt0, STARTs into the LIVE game, and counts hook hits on _tick
 // per frame: idle window, then the HOT held-RIGHT cursor repeat (the
 // machine-gun scenario SEva heard). PASS = avg in [0.8,1.5], no frame >3.
 // Hardware runs the identical instruction stream at 3.5 MHz, so headless
 // quarks/frame IS the hardware tempo. Constants: board.map of tap
-// c9827c58… (_tick=$0xd62a _qctr=$0xfcd4).
+// c9827c58… (_tick=$0xd6a0 _qctr=$0xfd1d).
 
 import (
 	"fmt"
@@ -78,7 +78,7 @@ func TestBalatrocShopQuarkTempoPlus2(t *testing.T) {
 	}
 	q := 0
 	emu.cpu.AddPreFetchHook("quark", func(pc uint16) {
-		if pc == 0xd62a { // _tick pass-48g map
+		if pc == 0xd6a0 { // _tick pass-48g map
 			q++
 		}
 	})

@@ -55,8 +55,8 @@ func TestBalatrocStormPlus2(t *testing.T) {
 	var wrS [][2]uint16
 	emu.mem.SetAllWriteHook(func(addr uint16, val byte) {
 		pc := emu.cpu.PC
-		if pc >= 0xD62A && pc <= 0xD680 {
-			return // legit stores inside _tick ($D62A, pass-48g)
+		if pc >= 0xD6A0 && pc <= 0xD680 {
+			return // legit stores inside _tick ($D6A0, pass-48g)
 		}
 		if addr >= 0xC000 && addr <= 0xFFF7 && (val == 0x65 || val == 0x6D) {
 			other := uint16(0)
@@ -136,16 +136,16 @@ func TestBalatrocStormPlus2(t *testing.T) {
 			fmt.Printf("SCRATCH-WRITES n=%d first pc=$%04X\n", len(wrS), wrS[0][0])
 			wrS = wrS[:0]
 		}
-		if (emu.cpu.PC >= 0xC4AE && emu.cpu.PC <= 0xC4C0) || emu.cpu.PC == 0xD62A || emu.cpu.PC == 0xD62B {
+		if (emu.cpu.PC >= 0xC524 && emu.cpu.PC <= 0xC4C0) || emu.cpu.PC == 0xD6A0 || emu.cpu.PC == 0xD62B {
 			name := fmt.Sprintf("WATCH@%04X", emu.cpu.PC)
 			_ = map[uint16]string{}
 			fmt.Printf("MUS-CALL %s sp=$%04X IX=$%04X canary=%02X%02X d0=%02X d1=%02X sp+2=%02X%02X\n",
 				name, emu.cpu.SP, emu.cpu.IX,
-				emu.mem.Read(0xC4AE), emu.mem.Read(0xC4AF),
+				emu.mem.Read(0xC524), emu.mem.Read(0xC4AF),
 				emu.mem.Read(0xC4B0), emu.mem.Read(0xC4B1),
 				emu.mem.Read(emu.cpu.SP+2), emu.mem.Read(emu.cpu.SP+3))
 		}
-		if emu.cpu.PC == 0xD5FB {
+		if emu.cpu.PC == 0xD671 {
 			fmt.Printf("C264-WATCH sp=$%04X A=$%02X BC=$%04X HL=$%04X DE=$%04X IX=$%04X IY=$%04X ret@sp=%02X %02X sp-2=%02X %02X sp+2=%02X %02X\n",
 				emu.cpu.SP, emu.cpu.A, emu.cpu.BC(), emu.cpu.HL(), emu.cpu.DE(), emu.cpu.IX, emu.cpu.IY,
 				emu.mem.Read(emu.cpu.SP), emu.mem.Read(emu.cpu.SP+1),

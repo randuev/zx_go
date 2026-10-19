@@ -68,7 +68,7 @@ func TestBalatrocCtlLabelsPlus2(t *testing.T) {
 		}
 	}
 	// jump straight into title_screen (proven entry law: sentinel + fresh stack)
-	const title = 0xaa5d
+	const title = 0xaab7
 	const redef = 0xA8A2
 	jump := func(pc uint16) {
 		sent := uint16(0x7D00)

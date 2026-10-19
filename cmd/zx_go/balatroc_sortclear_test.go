@@ -8,8 +8,8 @@ package main
 // SORT twice (a full cycle homes the first occupant) and demand the slot
 // interior is BYTE-IDENTICAL to the first capture. Any ghost of the
 // swapped-out occupant = corrupted equality.
-// Constants: board.map of tap c9827c58… (_shop_id=$0xff17 _shop_cost=$0xff19
-// _shop_sold=$0xff27 _shop_cur=$0xff29 _bank=$0xfcb7 _jok=$0xff0e).
+// Constants: board.map of tap c9827c58… (_shop_id=$0xff62 _shop_cost=$0xff64
+// _shop_sold=$0xff72 _shop_cur=$0xff74 _bank=$0xfd00 _jok=$0xff59).
 
 import (
 	"fmt"
@@ -23,12 +23,12 @@ func TestBalatrocSortClearPlus2(t *testing.T) {
 	if os.Getenv("SORTCLR") == "" {
 		t.Skip("set SORTCLR=1")
 	}
-	const shopID = 0xff17
-	const shopSold = 0xff27
-	const shopCost = 0xff19
-	const shopCur = 0xff29
-	const bank = 0xfcb7
-	const jok = 0xff0e
+	const shopID = 0xff62
+	const shopSold = 0xff72
+	const shopCost = 0xff64
+	const shopCur = 0xff74
+	const bank = 0xfd00
+	const jok = 0xff59
 	emu := balToShop(t, 3)
 	runF := func(n int) {
 		for i := 0; i < n; i++ {

@@ -6,7 +6,7 @@ package main
 // any state, tgt must equal the printed number.
 //
 // PASS-48g REBASE (honest-path law): _main is built sdcc_iy — EVERY local
-// is (iy+off), so jumping PC straight into _main/$0xab4d without crt0's IY
+// is (iy+off), so jumping PC straight into _main/$0xaba7 without crt0's IY
 // frame leaves the state machine reading garbage (the old harness "worked"
 // only while the poll player papered over it). This test now boots through
 // crt0 ($8000) exactly like the tape loader's RANDOMIZE USR, presses START,
@@ -16,8 +16,8 @@ package main
 //   PLAY exits -> next_round -> compute_target runs FOR REAL).
 // Then the ante-5 attack: live tgt must be 11250 (small blind, pass 35/47
 // ladder), a tiny 1440-score play must NOT announce STR_WIN.
-// Constants: board.map of tap c9827c58… (_tgt=$0xfca7 _score=$0xfedf
-// _ante=$0xfca5 _blind=$FEE4 _sfx_id=$0xfcd6, _STR_WIN=$0xdb35 banner id check
+// Constants: board.map of tap c9827c58… (_tgt=$0xfcf0 _score=$0xff2a
+// _ante=$0xfcee _blind=$FEE4 _sfx_id=$0xfd1f, _STR_WIN=$0xdbab banner id check
 // via sfx channel: sfx_win uses id 7 -> _sfx_id).
 
 import (
@@ -55,12 +55,12 @@ func TestBalatrocAnte5WinPlus2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const ante = 0xfca5
+	const ante = 0xfcee
 	const blind = 0xFEE4
-	const tgt = 0xfca7
-	const score = 0xfedf
-	const handsL = 0xfca3
-	const sfxid = 0xfcd6 // pass48c: wins announce as chC jingle id 7
+	const tgt = 0xfcf0
+	const score = 0xff2a
+	const handsL = 0xfcec
+	const sfxid = 0xfd1f // pass48c: wins announce as chC jingle id 7
 	const STRWIN = 7
 	rd16 := func(addr uint16) uint32 {
 		return uint32(emu.mem.Read(addr)) | uint32(emu.mem.Read(addr+1))<<8 |

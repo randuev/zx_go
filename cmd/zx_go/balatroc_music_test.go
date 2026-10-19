@@ -91,7 +91,7 @@ func TestBalatrocMusicPlus2(t *testing.T) {
 	if err := emu.ula.StopRecording(); err != nil {
 		t.Fatalf("rec stop: %v", err)
 	}
-	q := uint16(emu.mem.Read(0xFCD2)) | uint16(emu.mem.Read(0xfcd6))<<8
+	q := uint16(emu.mem.Read(0xFCD2)) | uint16(emu.mem.Read(0xfd1f))<<8
 	fmt.Printf("MUSIC qctr=%d halted=%v pc=$%04X\n", q, emu.cpu.Halted, emu.cpu.PC)
 	// content proof: DC-removed RMS must clear the silence floor
 	raw, err := os.ReadFile(wavPath)
