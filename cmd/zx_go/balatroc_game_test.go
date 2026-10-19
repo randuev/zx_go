@@ -87,8 +87,10 @@ func TestBalatrocGameMusicPlus2(t *testing.T) {
 			musicData = blocks[i+1].data
 		}
 	}
-	if boardData == nil || musicData == nil {
-		t.Fatal("board/music CODE block missing")
+	// pass-48: bulba retired — the AY player is EMBEDDED in the board block;
+	// there is no second CODE block any more. Only board must exist.
+	if boardData == nil {
+		t.Fatal("board CODE block missing")
 	}
 
 	prev := cliFlagsActive
@@ -114,12 +116,7 @@ func TestBalatrocGameMusicPlus2(t *testing.T) {
 	for i, v := range boardData {
 		emu.mem.Write(boardAddr+uint16(i), v)
 	}
-	for i, v := range musicData {
-		emu.mem.Write(0x6000+uint16(i), v)
-	}
-	if emu.mem.Read(0x6000) != 0x21 {
-		t.Fatalf("music $6000 head=%02X want 21", emu.mem.Read(0x6000))
-	}
+	_ = musicData // pass-48: unused — no $6000 PT3 stage any more
 	if emu.mem.Read(0x8000) == 0 {
 		t.Fatal("board not loaded")
 	}
@@ -138,8 +135,8 @@ func TestBalatrocGameMusicPlus2(t *testing.T) {
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
 
-	const qctr = 0xF80D
-	const sfxID = 0xF80F
+	const qctr = 0xFCD1
+	const sfxID = 0xFCD3
 	quarks, frames := 0, 0
 	lastGamePC := uint16(0)
 	romTaken := false

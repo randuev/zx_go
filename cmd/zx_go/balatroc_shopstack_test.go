@@ -2,13 +2,13 @@ package main
 
 // balatroc_shopstack_test.go — SEVA report: "when changing order of
 // jokers in store jokers are drawn on top of each other again".
-// Shop keys (shop_screen switch): SEL=buy, DISC=reroll, PLAY=next,
-// SORT=reorder-owned (pass 42, kmap SORT=(row1,0x02) 'S' after pass 46).
-// Repro: boot +2, force jok[0]=3 jok[1]=5 (two owned jokers), jump into
-// shop_screen ($A3EB), walk cursor onto owned row, stroke SORT, and
-// census rows b17..b21 (y136..y176): stacked ghosts = ink columns that
-// survive OUTSIDE the newly-painted card plates, or two texts sharing a
-// column region. PNGs captured at every moment.
+// PASS-48g REBASE: arrive at the shop through the REAL win pipeline
+// (balToShop), BUY two jokers with real SEL strokes (engine-owned, so
+// shop_new cannot wipe the fake jok state the old harness poked), then
+// SORT and census rows b17..b21 (y136..y176): stacked ghosts = ink OUTSIDE
+// the plate span (col 0 or col >12 for two cards), or jok[] ids lost.
+// Constants: board.map of tap c9827c58… (_shop_cur=$FF26 _bank=$FCB4
+// _jok=$FF0B _shop_id=$FF14 _shop_cost=$FF16 _shop_sold=$FF24).
 
 import (
 	"fmt"
@@ -22,60 +22,13 @@ func TestBalatrocShopStackPlus2(t *testing.T) {
 	if os.Getenv("SHOPSTACK") == "" {
 		t.Skip("set SHOPSTACK=1")
 	}
-	tapRaw, err := os.ReadFile("/root/nerve-workspace/demos/balatroc-c/build/board.tap")
-	if err != nil {
-		t.Fatalf("read tap: %v", err)
-	}
-	blocks := balParseTapBlocks(t, tapRaw)
-	var boardAddr uint16
-	var boardData, musicData []byte
-	for i := range blocks {
-		b := blocks[i]
-		if b.hdr && b.typ == 3 && trimName(b.name) == "board" && i+1 < len(blocks) {
-			boardAddr, boardData = b.start, blocks[i+1].data
-		}
-		if b.hdr && b.typ == 3 && trimName(b.name) == "music" && i+1 < len(blocks) {
-			musicData = blocks[i+1].data
-		}
-	}
-	prev := cliFlagsActive
-	nf := cliFlags{}
-	nf.noSound = true
-	nf.headless = true
-	cliFlagsActive = &nf
-	defer func() { cliFlagsActive = prev }()
-	emu, err := newEmulator(roms.ModelPlus2)
-	if err != nil {
-		t.Fatalf("newEmulator: %v", err)
-	}
-	const shopScreen = 0xA47E
-	const shopID = 0xFA53
-	const shopSold = 0xFA63
-	const shopCost = 0xFA55
-	const shopCur = 0xFA65
-	const bank = 0xF800
-	const jok = 0xFA4A
-	emu.paused.Store(false)
-	for i := 0; i < 220; i++ {
-		runOneFrameHeadless(emu, roms.ModelPlus2)
-	}
-	for i, v := range boardData {
-		emu.mem.Write(boardAddr+uint16(i), v)
-	}
-	for i, v := range musicData {
-		emu.mem.Write(0x6000+uint16(i), v)
-	}
-	// two owned jokers BEFORE shop entry (shop_new won't touch jok[])
-	emu.mem.Write(jok, 3)
-	emu.mem.Write(jok+1, 5)
-	emu.mem.Write(bank, 20)
-	emu.mem.Write(0x7D00, 0x76)
-	emu.cpu.SP = 0xFF56
-	emu.mem.Write(0xFF56, 0x00)
-	emu.mem.Write(0xFF57, 0x7D)
-	emu.cpu.PC = shopScreen
-	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
-	emu.cpu.IM = 1
+	const shopID = 0xFF14
+	const shopSold = 0xFF24
+	const shopCost = 0xFF16
+	const shopCur = 0xFF26
+	const bank = 0xFCB4
+	const jok = 0xFF0B
+	emu := balToShop(t, 3)
 	runF := func(n int) {
 		for i := 0; i < n; i++ {
 			runOneFrameHeadless(emu, roms.ModelPlus2)
@@ -105,8 +58,26 @@ func TestBalatrocShopStackPlus2(t *testing.T) {
 		fmt.Println()
 		return cols
 	}
-
-	runF(90)
+	// BUY two jokers for real: force cheap, never-sold ids and stroke SEL
+	// twice; between buys make sure bank covers the cost again.
+	buy := func(id byte) {
+		emu.mem.Write(shopID, id)
+		emu.mem.Write(shopSold, 0)
+		emu.mem.Write(shopCost, 4)
+		emu.mem.Write(bank, 20)
+		emu.mem.Write(shopCur, 0)
+		runF(20) // let shop repaint reflect the forced offer
+		stroke(4, 0x08, 60) // SEL -> shop_buy
+	}
+	buy(3)
+	buy(5)
+	runF(60)
+	fmt.Printf("after buys: jok=%d,%d bank=%d\n",
+		emu.mem.Read(jok), emu.mem.Read(jok+1), emu.mem.Read(bank))
+	if emu.mem.Read(jok) == 0 && emu.mem.Read(jok+1) == 0 {
+		t.Fatalf("buys landed nowhere: jok=%d,%d PC=$%04X",
+			emu.mem.Read(jok), emu.mem.Read(jok+1), emu.cpu.PC)
+	}
 	ownedInk("entry")
 	savePNGAtomic("/tmp/shop1_entry.png", emu.lastFrame())
 	// walk cursor onto owned joker 0: RIGHT x4 (offer0->1->pl0->pl1->own0)

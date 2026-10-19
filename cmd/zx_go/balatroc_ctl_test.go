@@ -68,8 +68,8 @@ func TestBalatrocCtlLabelsPlus2(t *testing.T) {
 		}
 	}
 	// jump straight into title_screen (proven entry law: sentinel + fresh stack)
-	const title = 0xAA03
-	const redef = 0xA84A
+	const title = 0xAA5B
+	const redef = 0xA8A2
 	jump := func(pc uint16) {
 		sent := uint16(0x7D00)
 		emu.mem.Write(sent, 0x76)

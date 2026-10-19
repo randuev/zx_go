@@ -1,15 +1,24 @@
 package main
 
-// balatroc_ante5win_test.go — SEVA shots 38/39 (2026-10-18 21:25): at
-// ANTE 5 a SINGLE card play printed "BLIND DEFEATED!" — targets 11250
-// and 45000 shown on the HUD while round score was 1440/450. Root cause
-// pass 46d: compute_target's ante>=5 branch stringified tgt IN PLACE
-// (tgt /= 10 down to ZERO) — HUD digits survived in the buffer, the
-// live target died, score >= 0 always won.
-// LAW: after compute_target at any state, tgt must equal the printed
-// number. This test: boot + START, force ante=5/blind=0, CALL the REAL
-// compute_target ($B0EC), demand tgt==11250 (not 0!), then play a tiny
-// hand through the REAL PLAY key and demand NO STR_WIN, tgt still live.
+// balatroc_ante5win_test.go — SEVA shots 38/39: at ANTE 5 a SINGLE card
+// play printed "BLIND DEFEATED!" — the live target died (tgt/=10 to zero)
+// while HUD digits survived in the buffer. LAW: after compute_target at
+// any state, tgt must equal the printed number.
+//
+// PASS-48g REBASE (honest-path law): _main is built sdcc_iy — EVERY local
+// is (iy+off), so jumping PC straight into _main/$AB4B without crt0's IY
+// frame leaves the state machine reading garbage (the old harness "worked"
+// only while the poll player papered over it). This test now boots through
+// crt0 ($8000) exactly like the tape loader's RANDOMIZE USR, presses START,
+// and climbs to ante 5 with REAL strokes only:
+//   per round: poke tgt=1 (any scoring hand wins), SEL one card, PLAY
+//   (score_anim -> score_wait key -> win banner key -> payout -> SHOP ->
+//   PLAY exits -> next_round -> compute_target runs FOR REAL).
+// Then the ante-5 attack: live tgt must be 11250 (small blind, pass 35/47
+// ladder), a tiny 1440-score play must NOT announce STR_WIN.
+// Constants: board.map of tap c9827c58… (_tgt=$FCA4 _score=$FEDC
+// _ante=$FCA2 _blind=$FEE4 _sfx_id=$FCD3, _STR_WIN=$DB33 banner id check
+// via sfx channel: sfx_win uses id 7 -> _sfx_id).
 
 import (
 	"fmt"
@@ -46,17 +55,21 @@ func TestBalatrocAnte5WinPlus2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const ante = 0xF7EE
-	const blind = 0xFA21
-	const tgt = 0xF7F0
-	const score = 0xFA19
-	const handsL = 0xF7EC
-	const msg = 0xFA22
-	const STRWIN = 0xDACA
-	const computeTarget = 0xB0EC
+	const ante = 0xFCA2
+	const blind = 0xFEE4
+	const tgt = 0xFCA4
+	const score = 0xFEDC
+	const handsL = 0xFCA0
+	const sfxid = 0xFCD3 // pass48c: wins announce as chC jingle id 7
+	const STRWIN = 7
 	rd16 := func(addr uint16) uint32 {
 		return uint32(emu.mem.Read(addr)) | uint32(emu.mem.Read(addr+1))<<8 |
 			uint32(emu.mem.Read(addr+2))<<16 | uint32(emu.mem.Read(addr+3))<<24
+	}
+	wu32 := func(addr uint16, v uint32) {
+		for j := 0; j < 4; j++ {
+			emu.mem.Write(addr+uint16(j), byte(v>>uint(8*j)))
+		}
 	}
 	emu.paused.Store(false)
 	for i := 0; i < 220; i++ {
@@ -65,15 +78,17 @@ func TestBalatrocAnte5WinPlus2(t *testing.T) {
 	for i, v := range bd {
 		emu.mem.Write(a+uint16(i), v)
 	}
-	for i, v := range md {
-		emu.mem.Write(0x6000+uint16(i), v)
+	if md != nil {
+		for i, v := range md {
+			emu.mem.Write(0x6000+uint16(i), v)
+		}
 	}
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
 	emu.cpu.SP = 0xFF56
 	emu.mem.Write(0xFF56, byte(sent))
 	emu.mem.Write(0xFF57, byte(sent>>8))
-	emu.cpu.PC = 0xAA03 // title_screen pass-47
+	emu.cpu.PC = 0x8000 // crt0 — the ONLY honest door
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
 	runF := func(n int) {
@@ -87,49 +102,40 @@ func TestBalatrocAnte5WinPlus2(t *testing.T) {
 		emu.kbd.PressMatrixKey(int(row), bit, false)
 		runF(tail)
 	}
-	runF(120) // title
-	stroke(4, 0x01, 150) // START -> first play screen
-	// force the reported state: ante 5, SMALL blind (shot 38)
-	emu.mem.Write(ante, 5)
-	emu.mem.Write(blind, 0)
-	// CALL the REAL compute_target and watch tgt survive
-	hlret := uint16(0)
-	savedSP := emu.cpu.SP
-	emu.cpu.SP = 0xFF56
-	emu.mem.Write(0xFF56, byte(sent))
-	emu.mem.Write(0xFF57, byte(sent>>8))
-	emu.cpu.Halted = false // title-screen RET parked us on the $7D00 HALT
-	emu.cpu.PC = computeTarget
-	stepsRun := 0
-	for i := 0; i < 400000; i++ {
-		emu.cpu.StepInstructionWithIRQ()
-		stepsRun = i
-		if emu.cpu.PC == sent {
-			hlret = emu.cpu.HL()
-			break
-		}
+	runF(160) // crt0 -> music_boot -> title poll
+	stroke(4, 0x01, 200) // START -> game_new -> round 1
+	for rnd := 0; rnd < 40 && emu.mem.Read(ante) < 5; rnd++ {
+		runF(140) // deal poll settle
+		wu32(tgt, 1) // any scoring hand beats this round
+		stroke(4, 0x08, 60) // SEL a card
+		stroke(4, 0x01, 700) // PLAY -> score_anim -> wait_key
+		runF(240)            // win banner + payout + shop paint
+		stroke(4, 0x01, 700) // leave shop: NEXT round (compute_target REAL)
+		fmt.Printf("rnd %2d: ante=%d blind=%d tgt=%d hands_l=%d PC=$%04X\n",
+			rnd, emu.mem.Read(ante), emu.mem.Read(blind), rd16(tgt),
+			emu.mem.Read(handsL), emu.cpu.PC)
 	}
-	fmt.Printf("steps=%d halted=%v paused=%v PC=$%04X SP=$%04X IFF1=%v\n",
-		stepsRun, emu.cpu.Halted, emu.paused.Load(), emu.cpu.PC, emu.cpu.SP, emu.cpu.IFF1)
-	emu.cpu.SP = savedSP
+	anteNow := emu.mem.Read(ante)
+	blindNow := emu.mem.Read(blind)
 	tg := rd16(tgt)
-	fmt.Printf("compute_target ante=5 small: tgt=%d (want 11250, NOT 0) hlret=$%04X\n", tg, hlret)
+	fmt.Printf("ante5 arrival: ante=%d blind=%d tgt=%d\n", anteNow, blindNow, tg)
+	if anteNow != 5 {
+		t.Fatalf("win-climb stalled at ante=%d (want 5)", anteNow)
+	}
 	if tg != 11250 {
-		t.Fatalf("compute_target ante5 small corrupts target: tgt=%d — win at score>=0 is guaranteed", tg)
+		t.Fatalf("ante-5 small target wrong via real flow: tgt=%d want 11250", tg)
 	}
-	// full play path: one card selected, PLAY — must NOT print STR_WIN
-	for j := 0; j < 4; j++ {
-		emu.mem.Write(score+uint16(j), byte(uint(1440)>>uint(8*j)))
-	}
-	// RIGHT x0: cursor already on a card; select exactly one, PLAY
+	// full play path at ante 5: score 1440 < tgt 11250 must NOT announce
+	// STR_WIN (the pass-46d lie was tgt destroyed to 0).
+	wu32(score, 1440)
 	stroke(4, 0x08, 40) // SEL
 	emu.kbd.PressMatrixKey(4, 0x01, true)
 	runF(4)
 	emu.kbd.PressMatrixKey(4, 0x01, false)
 	winLie := false
-	for f := 0; f < 700; f++ {
+	for f := 0; f < 900; f++ {
 		runOneFrameHeadless(emu, roms.ModelPlus2)
-		m := uint16(emu.mem.Read(msg)) | uint16(emu.mem.Read(msg+1))<<8
+		m := emu.mem.Read(sfxid)
 		if m == STRWIN {
 			fmt.Printf("!! STR_WIN at frame %d: score=%d tgt=%d\n", f, rd16(score), rd16(tgt))
 			winLie = rd16(score) < rd16(tgt)
