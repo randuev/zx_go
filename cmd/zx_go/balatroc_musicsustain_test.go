@@ -58,7 +58,7 @@ func TestBalatrocMusicSustainPlus2(t *testing.T) {
 	emu.cpu.D, emu.cpu.E, emu.cpu.H, emu.cpu.L = 0, 0, 0x80, 0x00
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
-	q := func() int { return int(emu.mem.Read(0xFD1D)) }
+	q := func() int { return int(emu.mem.Read(0xFA2A)) }
 	runF := func(n int) {
 		for i := 0; i < n; i++ {
 			runOneFrameHeadless(emu, roms.ModelPlus2)

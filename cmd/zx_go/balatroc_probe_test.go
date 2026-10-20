@@ -50,8 +50,8 @@ func TestBalatrocProbePlus2(t *testing.T) {
 	runF(120)
 	stroke(4, 0x01, 60)
 	emu.mem.Write(0xFF0C, 1)
-	emu.mem.Write(0xfced, 2)
-	emu.mem.Write(0xFF72, 4)
+	emu.mem.Write(0xF9FA, 2)
+	emu.mem.Write(0xFC7F, 4)
 	emu.cpu.SP = 0xFFFE
 	emu.mem.Write(0xFFFE, byte(sent))
 	emu.mem.Write(0xFFFF, byte(sent>>8))
@@ -60,7 +60,7 @@ func TestBalatrocProbePlus2(t *testing.T) {
 	runF(20)
 	{ var buf bytes.Buffer; _ = writeScreenshotPNG(emu,&buf); _ = os.WriteFile("/tmp/bal_probe.png",buf.Bytes(),0o644) }
 	fmt.Printf("PROBE pc=$%04X sp=$%04X halted=%v shop_cur=%d jok=%d,%d\n",
-		emu.cpu.PC, emu.cpu.SP, emu.cpu.Halted, emu.mem.Read(0xFF72), emu.mem.Read(0xFF0C), emu.mem.Read(0xfced))
+		emu.cpu.PC, emu.cpu.SP, emu.cpu.Halted, emu.mem.Read(0xFC7F), emu.mem.Read(0xFF0C), emu.mem.Read(0xF9FA))
 	lit := 0
 	row := map[int]int{}
 	for y := 0; y < 192; y++ {

@@ -135,8 +135,8 @@ func TestBalatrocGameMusicPlus2(t *testing.T) {
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
 
-	const qctr = 0xfd1d
-	const sfxID = 0xfd1f
+	const qctr = 0xFA2A
+	const sfxID = 0xFA2C
 	quarks, frames := 0, 0
 	lastGamePC := uint16(0)
 	romTaken := false

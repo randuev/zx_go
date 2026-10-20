@@ -65,7 +65,7 @@ func TestBalatrocIdleTempoPlus2(t *testing.T) {
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
 	// full frames incl. Pump? record path irrelevant; just count quark per frame at TITLE
-	q := func() int { return int(emu.mem.Read(0xFCD2)) | int(emu.mem.Read(0xfd1f))<<8 }
+	q := func() int { return int(emu.mem.Read(0xFCD2)) | int(emu.mem.Read(0xFA2C))<<8 }
 	runF := func(n int) { for i := 0; i < n; i++ { runOneFrameHeadless(emu, roms.ModelPlus2) } }
 	runF(120)
 	q0 := q()
@@ -136,9 +136,9 @@ func TestBalatrocRecordSoundsPlus2(t *testing.T) {
 		}
 	}
 	ph := func(tag string) {
-		qc := uint16(emu.mem.Read(0xFCD2)) | uint16(emu.mem.Read(0xfd1f))<<8
-		sc := int32(uint(emu.mem.Read(0xFF28)) | uint(emu.mem.Read(0xFEDE))<<8 |
-			uint(emu.mem.Read(0xFF2A))<<16 | uint(emu.mem.Read(0xFEE0))<<24)
+		qc := uint16(emu.mem.Read(0xFCD2)) | uint16(emu.mem.Read(0xFA2C))<<8
+		sc := int32(uint(emu.mem.Read(0xFC35)) | uint(emu.mem.Read(0xFEDE))<<8 |
+			uint(emu.mem.Read(0xFC37))<<16 | uint(emu.mem.Read(0xFEE0))<<24)
 		fmt.Printf("PHASE %-22s PC=$%04X SP=$%04X halted=%v qctr=%d score=%d\n",
 			tag, emu.cpu.PC, emu.cpu.SP, emu.cpu.Halted, qc, sc)
 	}
@@ -165,7 +165,7 @@ func TestBalatrocRecordSoundsPlus2(t *testing.T) {
 	ph("after-sel")
 	// make the hand winnable so STR_WIN fires: score above target
 	for j := 0; j < 4; j++ {
-		emu.mem.Write(0xFF28+uint16(j), byte(uint(300)>>uint(8*j)))
+		emu.mem.Write(0xFC35+uint16(j), byte(uint(300)>>uint(8*j)))
 	}
 	stroke(4, 0x01, 500) // 21.0 s PLAY hand (0) -> scoring tally + blind result
 	ph("after-play@31s")

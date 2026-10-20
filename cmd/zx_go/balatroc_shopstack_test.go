@@ -7,8 +7,8 @@ package main
 // shop_new cannot wipe the fake jok state the old harness poked), then
 // SORT and census rows b17..b21 (y136..y176): stacked ghosts = ink OUTSIDE
 // the plate span (col 0 or col >12 for two cards), or jok[] ids lost.
-// Constants: board.map of tap c9827c58… (_shop_cur=$0xff74 _bank=$0xfd00
-// _jok=$0xff59 _shop_id=$0xff62 _shop_cost=$0xff64 _shop_sold=$0xff72).
+// Constants: board.map of tap c9827c58… (_shop_cur=$0xFC81 _bank=$0xFA0D
+// _jok=$0xFC66 _shop_id=$0xFC6F _shop_cost=$0xFC71 _shop_sold=$0xFC7F).
 
 import (
 	"fmt"
@@ -22,12 +22,12 @@ func TestBalatrocShopStackPlus2(t *testing.T) {
 	if os.Getenv("SHOPSTACK") == "" {
 		t.Skip("set SHOPSTACK=1")
 	}
-	const shopID = 0xff62
-	const shopSold = 0xff72
-	const shopCost = 0xff64
-	const shopCur = 0xff74
-	const bank = 0xfd00
-	const jok = 0xff59
+	const shopID = 0xFC6F
+	const shopSold = 0xFC7F
+	const shopCost = 0xFC71
+	const shopCur = 0xFC81
+	const bank = 0xFA0D
+	const jok = 0xFC66
 	emu := balToShop(t, 3)
 	runF := func(n int) {
 		for i := 0; i < n; i++ {

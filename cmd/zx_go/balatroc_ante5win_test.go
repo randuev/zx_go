@@ -16,8 +16,8 @@ package main
 //   PLAY exits -> next_round -> compute_target runs FOR REAL).
 // Then the ante-5 attack: live tgt must be 11250 (small blind, pass 35/47
 // ladder), a tiny 1440-score play must NOT announce STR_WIN.
-// Constants: board.map of tap c9827c58… (_tgt=$0xfcf0 _score=$0xff2a
-// _ante=$0xfcee _blind=$FEE4 _sfx_id=$0xfd1f, _STR_WIN=$0xdbab banner id check
+// Constants: board.map of tap c9827c58… (_tgt=$0xF9FD _score=$0xFC37
+// _ante=$0xF9FB _blind=$FEE4 _sfx_id=$0xFA2C, _STR_WIN=$0xD8AB banner id check
 // via sfx channel: sfx_win uses id 7 -> _sfx_id).
 
 import (
@@ -55,12 +55,12 @@ func TestBalatrocAnte5WinPlus2(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	const ante = 0xfcee
+	const ante = 0xF9FB
 	const blind = 0xFEE4
-	const tgt = 0xfcf0
-	const score = 0xff2a
-	const handsL = 0xfcec
-	const sfxid = 0xfd1f // pass48c: wins announce as chC jingle id 7
+	const tgt = 0xF9FD
+	const score = 0xFC37
+	const handsL = 0xF9F9
+	const sfxid = 0xFA2C // pass48c: wins announce as chC jingle id 7
 	const STRWIN = 7
 	rd16 := func(addr uint16) uint32 {
 		return uint32(emu.mem.Read(addr)) | uint32(emu.mem.Read(addr+1))<<8 |

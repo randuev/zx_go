@@ -12,8 +12,8 @@ package main
 // error banner was born invisible. banner_at now paints immediately; the
 // gate boots live (crt0), STARTs round 1, strokes PLAY with NOTHING
 // selected, and demands the band-22 strip turns ink + yellow-paper attr.
-// Constants: board.map of tap 3ec1d25a… (_tgt=$FCF0 _hands_l=$FCEC
-// _banner_q=$FE7B _bmsg=$FE7C).
+// Constants: board.map of tap 3ec1d25a… (_tgt=$F9FD _hands_l=$F9F9
+// _banner_q=$FB88 _bmsg=$FB89).
 
 import (
 	"fmt"
@@ -96,9 +96,9 @@ func TestBalatrocCtl48hPlus2(t *testing.T) {
 	}
 
 	// --- (2) banner paints live on invalid PLAY ---
-	const tgt = 0xFCF0
-	const handsL = 0xFCEC
-	const bannerQ = 0xFE7B
+	const tgt = 0xF9FD
+	const handsL = 0xF9F9
+	const bannerQ = 0xFB88
 	emu := balBootLive(t)
 	runF := func(n int) {
 		for j := 0; j < n; j++ {
@@ -153,7 +153,7 @@ func TestBalatrocCtl48hPlus2(t *testing.T) {
 	// NO HANDS LEFT banner too: zero the counter, select one card, PLAY
 	emu.mem.Write(handsL, 0)
 	stroke(4, 0x08, 20) // SEL the cursor card
-	if nSel := emu.mem.Read(0xFF62); nSel == 0 {
+	if nSel := emu.mem.Read(0xFC6F); nSel == 0 {
 		stroke(4, 0x04, 20) // step onto a dealt card, then try again
 		stroke(4, 0x08, 20)
 	}

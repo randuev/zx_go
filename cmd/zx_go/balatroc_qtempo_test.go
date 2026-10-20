@@ -11,7 +11,7 @@ package main
 //   SCORE : score animation frames (select + PLAY)
 // LAW: quark delta / frame delta >= 0.90 through EVERY phase. A poll
 // player fails this at DEAL/SCORE; an ISR player cannot (hardware fact).
-// Constants: board.map of tap 88914c78… (_qctr=$FD1D).
+// Constants: board.map of tap 88914c78… (_qctr=$FA2A).
 
 import (
 	"fmt"
@@ -25,7 +25,7 @@ func TestBalatrocQTempoPlus2(t *testing.T) {
 	if os.Getenv("QTEMPO") == "" {
 		t.Skip("set QTEMPO=1")
 	}
-	const qctr = 0xfd1d
+	const qctr = 0xFA2A
 	emu := balBootLive(t)
 	runF := func(n int) {
 		for i := 0; i < n; i++ {

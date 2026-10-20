@@ -10,7 +10,7 @@ package main
 // machine-gun scenario SEva heard). PASS = avg in [0.8,1.5], no frame >3.
 // Hardware runs the identical instruction stream at 3.5 MHz, so headless
 // quarks/frame IS the hardware tempo. Constants: board.map of tap
-// c9827c58… (_tick=$0xd6a0 _qctr=$0xfd1d).
+// c9827c58… (_tick=$0xd6a0 _qctr=$0xFA2A).
 
 import (
 	"fmt"

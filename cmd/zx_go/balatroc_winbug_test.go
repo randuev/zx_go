@@ -47,13 +47,13 @@ func TestBalatrocWinBugPlus2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newEmulator: %v", err)
 	}
-	const score = 0xff2a
-	const tgt = 0xfcf0
-	const msg = 0xfe7c
-	const handsL = 0xfcec
-	const ante = 0xfcee
+	const score = 0xFC37
+	const tgt = 0xF9FD
+	const msg = 0xFB89
+	const handsL = 0xF9F9
+	const ante = 0xF9FB
 	const blind = 0xFEE4
-	const STRWIN = 0xdbab
+	const STRWIN = 0xD8AB
 	rd16 := func(a uint16) uint32 {
 		return uint32(emu.mem.Read(a)) | uint32(emu.mem.Read(a+1))<<8 |
 			uint32(emu.mem.Read(a+2))<<16 | uint32(emu.mem.Read(a+3))<<24

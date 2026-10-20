@@ -12,7 +12,7 @@ package main
 //      opens MIX_SFXC $3B — chC stays sovereign even muted (pass 48e law)
 //   5. M again         : _mute 1->0, mixer returns to $3C
 // Harness constants from board.map of tap c9827c58…:
-// _mute=$0xfd24 _qctr=$0xfd1d _sfx_id=$0xfd1f _sfxp=$0xfd20 _ayc=$0xfd2b.
+// _mute=$0xFA31 _qctr=$0xFA2A _sfx_id=$0xFA2C _sfxp=$0xFA2D _ayc=$0xFA38.
 
 import (
 	"fmt"
@@ -73,8 +73,8 @@ func TestBalatrocMutePlus2(t *testing.T) {
 		runF(tail)
 	}
 	rd8 := func(ad uint16) int { return int(emu.mem.Read(ad)) }
-	q := func() int { return int(emu.mem.Read(0xFD1D)) }
-	ay7 := func() int { return rd8(0xfd2b + 7) }
+	q := func() int { return int(emu.mem.Read(0xFA2A)) }
+	ay7 := func() int { return rd8(0xFA38 + 7) }
 	// honest entry: crt0 -> _main -> music_boot -> title (polls START)
 	runF(160)
 	if ay7() != 0x3C {
@@ -84,22 +84,22 @@ func TestBalatrocMutePlus2(t *testing.T) {
 	if ay := ay7(); ay != 0x3C && ay != 0x38 {
 		t.Fatalf("game mixer not unmuted: ay7=$%02X", ay)
 	}
-	if rd8(0xfd24) != 0 {
-		t.Fatalf("mute starts %d, want 0", rd8(0xfd24))
+	if rd8(0xFA31) != 0 {
+		t.Fatalf("mute starts %d, want 0", rd8(0xFA31))
 	}
 	// M down -> mute=1; mixer MUST rewrite to MIX_MUTE $3F
 	stroke(7, 0x04, 40)
-	m1 := rd8(0xfd24)
+	m1 := rd8(0xFA31)
 	q1 := q()
 	runF(120)
 	q2 := q()
 	// arm an SFX WHILE muted: chC sovereignty => mixer opens $3B
-	emu.mem.Write(0xfd20, 0x10)
-	emu.mem.Write(0xFCD8, 0x7D) // _sfxp HI = $7D10 (free RAM row)
+	emu.mem.Write(0xFA2D, 0x10)
+	emu.mem.Write(0xF9E5, 0x7D) // _sfxp HI = $7D10 (free RAM row)
 	emu.mem.Write(0x7D10, 0x00) // tone lo
 	emu.mem.Write(0x7D11, 0x00) // tone hi
 	emu.mem.Write(0x7D12, 0x00) // vol 0 -> plays, then auto-disarm
-	emu.mem.Write(0xfd1f, 5)    // _sfx_id = 5
+	emu.mem.Write(0xFA2C, 5)    // _sfx_id = 5
 	saw3B := false
 	for i := 0; i < 8; i++ {
 		runF(1)
@@ -109,7 +109,7 @@ func TestBalatrocMutePlus2(t *testing.T) {
 	}
 	// M again -> unmute; mixer must close back to MIX_IDLE $3C
 	stroke(7, 0x04, 60)
-	m2 := rd8(0xfd24)
+	m2 := rd8(0xFA31)
 	fmt.Printf("mute: %d->%d, quark %d->%d while muted, ay7=%02X sawSFXC=%v\n",
 		m1, m2, q1, q2, ay7(), saw3B)
 	if m1 != 1 || m2 != 0 {
