@@ -106,7 +106,7 @@ func TestBalatrocRunPlateProbe(t *testing.T) {
 		return n
 	}
 	head := lit(40, 71, 10, 25) // big-letter band
-	rows := lit(88, 143, 0, 31)  // stats rows band
+	rows := lit(88, 143, 0, 31) // stats rows band
 	fmt.Printf("PLATE win: headPxBytes=%d rowsBytes=%d PC=$%04X\n", head, rows, emu.cpu.PC)
 	savePNGAtomic("/tmp/plate_win.png", emu.lastFrame())
 	if head == 0 {
@@ -124,6 +124,35 @@ func TestBalatrocRunPlateProbe(t *testing.T) {
 	head = lit(40, 71, 10, 25)
 	fmt.Printf("PLATE over: headPxBytes=%d PC=$%04X\n", head, emu.cpu.PC)
 	savePNGAtomic("/tmp/plate_over.png", emu.lastFrame())
+
+	// RAM headline census: ink columns must separate chars at pitch 24
+	cols := make([]int, 256)
+	for y := 48; y < 62; y++ {
+		for bx := 0; bx < 32; bx++ {
+			a := uint16(0x4000 + ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + bx)
+			v := emu.mem.Read(a)
+			for b := 0; b < 8; b++ {
+				if v&(1<<uint(7-b)) != 0 {
+					cols[bx*8+b]++
+				}
+			}
+		}
+	}
+	// runs of lit columns
+	var runs [][2]int
+	inr := false
+	st := 0
+	for x := 0; x < 256; x++ {
+		if cols[x] > 0 && !inr {
+			st, inr = x, true
+		}
+		if cols[x] == 0 && inr {
+			runs = append(runs, [2]int{st, x - st})
+			inr = false
+		}
+	}
+	fmt.Printf("PLATE cols runs=%v\n", runs)
+
 	if head == 0 {
 		t.Error("over plate big-letter band empty")
 	}
