@@ -62,11 +62,15 @@ func TestBalatrocRunPlateProbe(t *testing.T) {
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
 	jumpA := func(fn uint16, a byte) {
+		// sdcc_iy arg law (asm-proven): caller pushes ARG first, then
+		// the return address; callee reads (ix+4).
 		emu.cpu.Halted = false
+		emu.cpu.SP -= 2
+		emu.mem.Write(emu.cpu.SP, a)
+		emu.mem.Write(emu.cpu.SP+1, 0)
 		emu.cpu.SP -= 2
 		emu.mem.Write(emu.cpu.SP, byte(sent))
 		emu.mem.Write(emu.cpu.SP+1, byte(sent>>8))
-		emu.cpu.A = a
 		emu.cpu.PC = fn
 	}
 	runF(150)
