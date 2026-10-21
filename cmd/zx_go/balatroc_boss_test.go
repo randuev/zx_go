@@ -405,3 +405,89 @@ func TestBalatrocBossP2Plus2(t *testing.T) {
 	}
 	fmt.Println("PHASE2 OK")
 }
+
+// PASS 55 gate (BOSS=1): boss challenge name rides the panel line UNDER
+// the blind name — black ink on YELLOW plate (attr 0x30); erased clean
+// when no boss. Deck-stat law: NO bright bit anywhere in the suit grid
+// (the pass-54 red cells blazed with bright-white paper vs plain paper
+// on ♠/♣ — Seva spotted it; ink carries the red, paper stays plain).
+func TestBalatrocBossPanelPlus2(t *testing.T) {
+	if os.Getenv("BOSS") == "" {
+		t.Skip("set BOSS=1")
+	}
+	emu, syms := balBossSetup(t)
+	run := func(frames int) {
+		for i := 0; i < frames; i++ {
+			runOneFrameHeadless(emu, roms.ModelPlus2)
+		}
+	}
+	run(150)
+	attr := func(row, col int) uint8 { return emu.mem.Read(uint16(0x5800 + row*32 + col)) }
+	pa := func(y, bx int) uint16 {
+		return uint16(0x4000 + ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + bx)
+	}
+	bandInk := func(y0, y1, bx0, bx1 int) int {
+		n := 0
+		for y := y0; y <= y1; y++ {
+			for bx := bx0; bx <= bx1; bx++ {
+				if emu.mem.Read(pa(y, bx)) != 0 {
+					n++
+				}
+			}
+		}
+		return n
+	}
+	// boss live: WINDOW on the line under "BOSS"
+	emu.mem.Write(syms["blind"], 2)
+	emu.mem.Write(syms["boss_id"], 6)
+	balCallNoArg(t, emu, syms["draw_board"])
+	plate, ink := 0, bandInk(8, 15, 0, 10)
+	for c := 0; c <= 10; c++ {
+		if attr(1, c) == 0x30 {
+			plate++
+		}
+	}
+	fmt.Printf("PANEL boss: yellow-plate cells=%d/11 name-ink=%d border=%d\n",
+		plate, ink, emu.ula.BorderColour&0x07)
+	if plate != 11 {
+		t.Errorf("boss plate incomplete: %d/11 cells yellow", plate)
+	}
+	if ink == 0 {
+		t.Error("boss name never painted on panel line")
+	}
+	// no boss: line erased — plain panel paper, zero ink
+	emu.mem.Write(syms["blind"], 1)
+	emu.mem.Write(syms["boss_id"], 0)
+	balCallNoArg(t, emu, syms["draw_board"])
+	run(2)
+	plain, inkOff := 0, bandInk(8, 15, 0, 10)
+	for c := 0; c <= 10; c++ {
+		if attr(1, c) == 0x07 {
+			plain++
+		}
+	}
+	fmt.Printf("PANEL off: plain cells=%d/11 ink=%d\n", plain, inkOff)
+	if plain != 11 || inkOff != 0 {
+		t.Errorf("panel line not erased: plain=%d/11 ink=%d", plain, inkOff)
+	}
+	// deck stat grid: bright bit must be gone everywhere; ♦/♥ ink red
+	balCallNoArg(t, emu, syms["paint_stats"])
+	bright, badInk := 0, 0
+	for row := 15; row <= 22; row++ {
+		for c := 2; c <= 27; c++ {
+			a := attr(row, c)
+			if a&0x40 != 0 {
+				bright++
+			}
+			if row == 17 || row == 19 { // H, D rows: ink bits must be RED
+				if a&0x07 != 0x02 && a != 0x07 && a != 0x37 {
+					badInk++
+				}
+			}
+		}
+	}
+	fmt.Printf("STATS grid: bright-cells=%d red-ink-mismatch=%d\n", bright, badInk)
+	if bright != 0 {
+		t.Errorf("deck stat grid still blazes: %d bright cells", bright)
+	}
+}
