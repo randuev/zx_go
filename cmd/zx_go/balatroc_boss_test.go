@@ -157,7 +157,7 @@ func TestBalatrocBossRulesPlus2(t *testing.T) {
 	}
 	run(150)
 	seen := map[uint8]int{}
-	rounds := 8
+	rounds := 13
 	for r := 0; r < rounds; r++ {
 		// position at ante r+1 BIG blind so next_round wraps to BOSS
 		emu.mem.Write(syms["ante"], uint8(r+1))
@@ -167,7 +167,7 @@ func TestBalatrocBossRulesPlus2(t *testing.T) {
 			t.Fatalf("round %d: blind did not land on boss", r)
 		}
 		b := emu.mem.Read(syms["boss_id"])
-		if b < 1 || b > 5 {
+		if b < 1 || b > 10 {
 			t.Fatalf("round %d: boss_id=%d out of pool", r, b)
 		}
 		hands := emu.mem.Read(syms["hands_l"])
@@ -195,9 +195,16 @@ func TestBalatrocBossRulesPlus2(t *testing.T) {
 				t.Errorf("WALL/HOOK keep standard counters: h=%d d=%d cap=%d",
 					hands, discs, cap)
 			}
+		default:
+			// PASS 54 WINDOW/CLUB/EYE/MOUTH/ARM: score-time bosses leave
+			// the counters untouched — felt in eval, not in the HUD
+			if hands != 4 || discs != 3 || cap != 8 {
+				t.Errorf("boss %d must keep standard counters: h=%d d=%d cap=%d",
+					b, hands, discs, cap)
+			}
 		}
 		seen[b]++
-		if r < 4 && len(seen) != r+1 {
+		if r < 10 && len(seen) != r+1 {
 			t.Errorf("round %d: boss repeat inside fresh pool (%v)", r, seen)
 		}
 	}
@@ -225,8 +232,176 @@ func TestBalatrocBossRulesPlus2(t *testing.T) {
 	}
 	emu.mem.Write(syms["boss_id"], 0)
 	balCallNoArg(t, emu, syms["boss_hook"])
-	fmt.Printf("BOSSPOOL rounds=%d distinct=%d/5 seen=%v\n", rounds, len(seen), seen)
-	if len(seen) != 5 {
-		t.Errorf("pool never drained across 8 boss rounds: %v", seen)
+	fmt.Printf("BOSSPOOL rounds=%d distinct=%d/10 seen=%v\n", rounds, len(seen), seen)
+	if len(seen) != 10 {
+		t.Errorf("pool never drained across %d boss rounds: %v", rounds, seen)
 	}
+}
+
+// PASS 54 PHASE 2 — score-time bosses on the real play_sel path.
+// Cards: Broadway SF spades 47..51, diamonds 34..38, clubs 8..12;
+// pairs of Kings by suit (♠50 ♥25 ♦38 ♣12). SF base: 100ch × 8m.
+func TestBalatrocBossP2Plus2(t *testing.T) {
+	if os.Getenv("BOSS") == "" {
+		t.Skip("set BOSS=1")
+	}
+	emu, syms := balBossSetup(t)
+	run := func(frames int) {
+		for i := 0; i < frames; i++ {
+			runOneFrameHeadless(emu, roms.ModelPlus2)
+		}
+	}
+	run(150)
+	rd16 := func(a uint16) uint16 {
+		return uint16(emu.mem.Read(a)) | uint16(emu.mem.Read(a+1))<<8
+	}
+	wr32 := func(a uint16, v uint32) {
+		for i := 0; i < 4; i++ {
+			emu.mem.Write(a+uint16(i), byte(v>>(8*i)))
+		}
+	}
+	stage := func(cards ...uint8) {
+		for i := 0; i < 8; i++ {
+			emu.mem.Write(syms["hand"]+uint16(i), 0xFF)
+			emu.mem.Write(syms["selected"]+uint16(i), 0)
+		}
+		for i, c := range cards {
+			emu.mem.Write(syms["hand"]+uint16(i), c)
+			emu.mem.Write(syms["selected"]+uint16(i), 1)
+			emu.mem.Write(syms["sel_order"]+uint16(i), c)
+		}
+		emu.mem.Write(syms["n_order"], byte(len(cards)))
+		wr32(syms["score"], 0)
+	}
+	fmt.Println("PASS54 PHASE2 = score-time bosses on the real play_sel path")
+	sp := []uint8{47, 48, 49, 50, 51}
+	dm := []uint8{34, 35, 36, 37, 38}
+	cl := []uint8{8, 9, 10, 11, 12}
+
+	// --- WINDOW: ♦ SF scores, then debuffed ------------------------------
+	emu.mem.Write(syms["boss_id"], 0)
+	balCallNoArg(t, emu, syms["boss_apply"])
+	stage(sp...)
+	balCallNoArg(t, emu, syms["play_sel"])
+	sPlain, chiPlain := rd32(emu, syms["score"]), rd16(syms["last_chi"])
+	stage(dm...)
+	balCallNoArg(t, emu, syms["play_sel"])
+	dPlain := rd32(emu, syms["score"])
+	fmt.Printf("plain: SF spades chi=%d score=%d, SF diamonds score=%d\n",
+		chiPlain, sPlain, dPlain)
+
+	emu.mem.Write(syms["boss_id"], 6)
+	balCallNoArg(t, emu, syms["boss_apply"])
+	if emu.mem.Read(syms["dsuit"]) != 2 {
+		t.Errorf("WINDOW: dsuit=%d want 2", emu.mem.Read(syms["dsuit"]))
+	}
+	stage(dm...)
+	balCallNoArg(t, emu, syms["play_sel"])
+	chiW, sW := rd16(syms["last_chi"]), rd32(emu, syms["score"])
+	fmt.Printf("WINDOW: ♦SF chips %d -> %d (score %d -> %d), hand still SF=%d\n",
+		chiPlain, chiW, dPlain, sW, emu.mem.Read(syms["htype"]))
+	if emu.mem.Read(syms["htype"]) != 8 {
+		t.Errorf("WINDOW broke the SF detection: htype=%d", emu.mem.Read(syms["htype"]))
+	}
+	if chiW >= chiPlain || sW >= dPlain {
+		t.Errorf("WINDOW: diamonds not debuffed (chi %d vs %d)", chiW, chiPlain)
+	}
+	stage(sp...)
+	balCallNoArg(t, emu, syms["play_sel"])
+	if rd32(emu, syms["score"]) != sPlain {
+		t.Errorf("WINDOW: spades SF also debuffed — law is ♦ only")
+	}
+
+	// --- CLUB: same law on ♣ -----------------------------------------------
+	emu.mem.Write(syms["boss_id"], 7)
+	balCallNoArg(t, emu, syms["boss_apply"])
+	if emu.mem.Read(syms["dsuit"]) != 0 {
+		t.Errorf("CLUB: dsuit=%d want 0", emu.mem.Read(syms["dsuit"]))
+	}
+	stage(cl...)
+	balCallNoArg(t, emu, syms["play_sel"])
+	chiC := rd16(syms["last_chi"])
+	fmt.Printf("CLUB: ♣SF chips %d -> %d\n", chiPlain, chiC)
+	if chiC >= chiPlain {
+		t.Errorf("CLUB: clubs not debuffed (chi %d)", chiC)
+	}
+	emu.mem.Write(syms["boss_id"], 0)
+	balCallNoArg(t, emu, syms["boss_apply"])
+	if emu.mem.Read(syms["dsuit"]) != 0xFF {
+		t.Errorf("dsuit not cleared after boss off: %02X", emu.mem.Read(syms["dsuit"]))
+	}
+
+	// --- ARM: level -1, preview == score -------------------------------
+	lvl := syms["lvl"]
+	emu.mem.Write(lvl+8, 3) // SF at level 3: 100+30 ch, 8+2 m
+	emu.mem.Write(syms["boss_id"], 0)
+	stage(sp...)
+	balCallNoArg(t, emu, syms["play_sel"])
+	chi3, mult3 := rd16(syms["last_chi"]), rd16(syms["last_mult"])
+	emu.mem.Write(syms["boss_id"], 10)
+	balCallNoArg(t, emu, syms["boss_apply"])
+	stage(sp...)
+	balCallNoArg(t, emu, syms["play_sel"])
+	chiA, multA := rd16(syms["last_chi"]), rd16(syms["last_mult"])
+	balCallNoArg(t, emu, syms["base_chi"])
+	chiPrev := emu.cpu.HL() // u16 return lives in HL (sdcc ABI)
+	fmt.Printf("ARM: lvl3 SF %dch×%dm -> scored %dch×%dm; base preview %d\n",
+		chi3, mult3, chiA, multA, chiPrev)
+	if chiA != chi3-15 || multA != mult3-1 {
+		t.Errorf("ARM: expected %dch×%dm, got %d×%d", chi3-15, mult3-1, chiA, multA)
+	}
+	// calculator law: the PREVIEW base is the ARMED one too — 100+15=115
+	if chiPrev != 115 {
+		t.Errorf("ARM: calculator base_chi=%d, want 115 (lvl2 base)", chiPrev)
+	}
+
+	// --- EYE: one hand of each type per round -------------------------
+	emu.mem.Write(syms["boss_id"], 8)
+	emu.mem.Write(lvl+8, 1)
+	balCallNoArg(t, emu, syms["boss_apply"])
+	emu.mem.Write(syms["eye_seen"], 0)
+	emu.mem.Write(syms["eye_block"], 0)
+	// first PAIR scores (K♠50 K♥24)
+	stage(50, 24)
+	balCallNoArg(t, emu, syms["play_sel"])
+	first := rd32(emu, syms["score"])
+	ht1 := emu.mem.Read(syms["htype"])
+	// second PAIR (K♦37 K♣11) must die silent
+	stage(37, 11)
+	balCallNoArg(t, emu, syms["play_sel"])
+	second := rd32(emu, syms["score"])
+	fmt.Printf("EYE: pair #1 scored %d, pair #2 scored %d (block=%d seen=%04X)\n",
+		first, second, emu.mem.Read(syms["eye_block"]), rd16(syms["eye_seen"]))
+	if first == 0 || ht1 != 1 {
+		t.Errorf("EYE: first pair did not score as PAIR (score=%d htype=%d)",
+			first, ht1)
+	}
+	if second != 0 || emu.mem.Read(syms["eye_block"]) != 1 {
+		t.Error("EYE: repeated pair type was NOT blocked")
+	}
+	// a DIFFERENT type must still score (high card A♠ alone)
+	emu.mem.Write(syms["eye_block"], 0)
+	stage(51)
+	balCallNoArg(t, emu, syms["play_sel"])
+	if rd32(emu, syms["score"]) == 0 {
+		t.Error("EYE: a new hand type was wrongly blocked")
+	}
+
+	// --- MOUTH: one suit only, refused at the gate ---------------------
+	emu.mem.Write(syms["boss_id"], 9)
+	balCallNoArg(t, emu, syms["boss_apply"])
+	stage(47, 25) // ♠ + ♥: mixed
+	balCallNoArg(t, emu, syms["mouth_ok"])
+	mixed := emu.cpu.HL() & 0xFF // sdcc: uint8_t returns in L
+	stage(47, 48) // ♠ + ♠: legal
+	balCallNoArg(t, emu, syms["mouth_ok"])
+	pure := emu.cpu.HL() & 0xFF
+	fmt.Printf("MOUTH: mixed ok=%d pure ok=%d\n", mixed, pure)
+	if mixed != 0 {
+		t.Error("MOUTH: mixed-suit selection accepted")
+	}
+	if pure != 1 {
+		t.Error("MOUTH: single-suit selection refused")
+	}
+	fmt.Println("PHASE2 OK")
 }

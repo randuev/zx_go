@@ -78,7 +78,7 @@ func TestBalatrocShopQuarkTempoPlus2(t *testing.T) {
 	}
 	q := 0
 	emu.cpu.AddPreFetchHook("quark", func(pc uint16) {
-		if pc == 0xd6a0 { // _tick pass-48g map
+		if pc == balSym("tick") { // _tick from live board.map
 			q++
 		}
 	})

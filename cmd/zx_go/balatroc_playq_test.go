@@ -93,7 +93,7 @@ func TestBalatrocPlayQuarkPlus2(t *testing.T) {
 	}
 	avg := float64(tot) / float64(len(per))
 	fmt.Printf("play-screen quarks: total=%d avgqpf=%.3f max=%d PC=$%04X hands=%d\n",
-		tot, avg, max, emu.cpu.PC, emu.mem.Read(0xF9FA))
+		tot, avg, max, emu.cpu.PC, emu.mem.Read(balSym("hands_l")))
 	h := map[int]int{}
 	for _, v := range per {
 		h[v]++

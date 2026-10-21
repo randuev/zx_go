@@ -13,8 +13,7 @@ package main
 // (4) banner plate (live): on the PLAY screen the yellow plate covers
 //     cols 11..31 ONLY — the left panel cols 0..10 keep black paper
 //     during the banner and after expiry (no green stripe, ever).
-// Constants: board.map of tap 88914c78… (_hand=$FC17 _play=$FC1F
-// _selected=$FC24 _n_order=$FC34 _cursor=$FC35 _score=$FC37
+// Addresses live: rebased from build/board.map via balSym() at run time.
 // _hands_l=$F9F9 _tgt=$F9FD _bank=$FA0D _banner_q=$FB88).
 
 import (
@@ -119,11 +118,11 @@ func TestBalatrocPass48iPlus2(t *testing.T) {
 	fmt.Printf("48i banner: plate cols11..31 yellow, panel cols0..10 attr=%02X/%02X/%02X OK\n",
 		d[0], d[5], d[10])
 	// let it expire (banner_q ticks inside scanKey)
-	for k := 0; k < 400 && rd(0xFB88) != 0; k++ {
+	for k := 0; k < 400 && rd(balSym("banner_q")) != 0; k++ {
 		runF(1)
 	}
-	if rd(0xFB88) != 0 {
-		t.Fatalf("banner_q never expired: %d", rd(0xFB88))
+	if rd(balSym("banner_q")) != 0 {
+		t.Fatalf("banner_q never expired: %d", rd(balSym("banner_q")))
 	}
 	e := bandAttr()
 	if e[0]&0x38 == 0x30 || e[10]&0x38 == 0x30 {
@@ -132,9 +131,9 @@ func TestBalatrocPass48iPlus2(t *testing.T) {
 	savePNGAtomic("/tmp/pass48i_banner.png", emu.lastFrame())
 
 	// --- (1) select -> SORT -> PLAY preserves the selection ---
-	handAt := func(i int) byte { return rd(uint16(0xFC17 + uint16(i))) }
+	handAt := func(i int) byte { return rd(balSym("hand") + uint16(i)) }
 	var targets []byte
-	cur := int(rd(0xFC35))
+	cur := int(rd(balSym("cursor")))
 	for i := 0; i < 8 && len(targets) < 3; i++ {
 		b := handAt(i)
 		if b == 0xFF {
@@ -142,24 +141,24 @@ func TestBalatrocPass48iPlus2(t *testing.T) {
 		}
 		for cur != i {
 			balStroke(emu, runF, 4, 0x04, 12) // RIGHT
-			cur = int(rd(0xFC35))              // trust the game, not hope
+			cur = int(rd(balSym("cursor")))              // trust the game, not hope
 		}
 		balStroke(emu, runF, 4, 0x08, 12) // SEL
-		if cur != int(rd(0xFC35)) {
-			t.Fatalf("cursor moved after SEL: want %d got %d", cur, rd(0xFC35))
+		if cur != int(rd(balSym("cursor"))) {
+			t.Fatalf("cursor moved after SEL: want %d got %d", cur, rd(balSym("cursor")))
 		}
 		targets = append(targets, b)
 		fmt.Printf("48i SEL slot%d card=%02X n_order=%d selected=%02X\n",
-			i, b, rd(0xFC34), uint(rd(0xFC24))|uint(rd(0xFF18))<<8)
+			i, b, rd(balSym("n_order")), uint(rd(balSym("last_chi"))) | uint(rd(balSym("last_chi")+1))<<8)
 	}
-	if len(targets) < 3 || rd(0xFC34) != byte(len(targets)) {
-		t.Fatalf("selection setup: targets=%d n_order=%d", len(targets), rd(0xFC34))
+	if len(targets) < 3 || rd(balSym("n_order")) != byte(len(targets)) {
+		t.Fatalf("selection setup: targets=%d n_order=%d", len(targets), rd(balSym("n_order")))
 	}
 	// SORT (act 5 = 'S' = row1 bit1)
 	balStroke(emu, runF, 1, 0x02, 10)
 	runF(8)
-	if rd(0xFC34) != byte(len(targets)) {
-		t.Fatalf("SORT dropped the queue: n_order=%d", rd(0xFC34))
+	if rd(balSym("n_order")) != byte(len(targets)) {
+		t.Fatalf("SORT dropped the queue: n_order=%d", rd(balSym("n_order")))
 	}
 	// the selected cards must still all be IN the hand
 	for _, c := range targets {
@@ -174,13 +173,12 @@ func TestBalatrocPass48iPlus2(t *testing.T) {
 		}
 	}
 	// PLAY -> all three must land in play[]
-	score0 := uint32(rd(0xFC37)) | uint32(rd(0xFF2B))<<8 |
-		uint32(rd(0xFF2C))<<16 | uint32(rd(0xFF2D))<<24
+	score0 := rd32(emu, balSym("score"))
 	balStroke(emu, runF, 4, 0x01, 30)
 	runF(40)
 	var played []byte
 	for i := 0; i < 3; i++ {
-		played = append(played, rd(uint16(0xFC1F+uint16(i))))
+		played = append(played, rd(balSym("play")+uint16(i)))
 	}
 	for _, c := range targets {
 		inPlay := false
@@ -194,24 +192,24 @@ func TestBalatrocPass48iPlus2(t *testing.T) {
 				c, played[0], played[1], played[2])
 		}
 	}
-	if rd(0xFC34) != 0 {
-		t.Fatalf("queue not consumed: n_order=%d", rd(0xFC34))
+	if rd(balSym("n_order")) != 0 {
+		t.Fatalf("queue not consumed: n_order=%d", rd(balSym("n_order")))
 	}
-	var score1lo, score1hi, stable byte
-	score1lo = rd(0xFC37)
-	score1hi = rd(0xFF2B)
+	var score1, stable uint32
+	score1 = rd32(emu, balSym("score"))
+	
 	// wait for the score animation to release the poll loop: score must
 	// stop changing before further strokes
 	for k := 0; k < 1500; k++ {
 		runF(1)
-		if rd(0xFC37) == score1lo && rd(0xFF2B) == score1hi {
+		if rd32(emu, balSym("score")) == score1 {
 			stable++
 			if stable >= 30 {
 				break
 			}
 		} else {
-			score1lo = rd(0xFC37)
-			score1hi = rd(0xFF2B)
+			score1 = rd32(emu, balSym("score"))
+			
 			stable = 0
 		}
 	}
@@ -220,14 +218,14 @@ func TestBalatrocPass48iPlus2(t *testing.T) {
 	// --- payout smoke: balToShop drives the REAL win pipeline (tgt=1
 	// poke + SEL + knocking PLAY strokes); WIN evidence is a strictly
 	// growing bank through win_payout. shop then owns the poll loop.
-	bank0 := rd(0xFA0D)
+	bank0 := rd(balSym("bank"))
 	_ = bank0
 	shopEmu := balToShop(t, 2)
 	rdS := func(ad uint16) byte { return shopEmu.mem.Read(ad) }
 	fmt.Printf("48i shop: ante=%d bank=%d PC=$%04X\n",
-		rdS(0xF9FB), rdS(0xFA0D), shopEmu.cpu.PC)
+		rdS(balSym("ante")), rdS(balSym("bank")), shopEmu.cpu.PC)
 	savePNGAtomic("/tmp/pass48i_shop.png", shopEmu.lastFrame())
-	if rdS(0xFA0D) == 0 {
+	if rdS(balSym("bank")) == 0 {
 		t.Fatalf("bank zero in shop")
 	}
 savePNGAtomic("/tmp/pass48i_win.png", emu.lastFrame())
