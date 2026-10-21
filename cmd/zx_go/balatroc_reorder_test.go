@@ -43,7 +43,7 @@ func TestBalatrocReorderPlus2(t *testing.T) {
 	var boardAddr uint16
 	for i := range blocks {
 		b := blocks[i]
-		if b.hdr && b.typ == 3 && trimName(b.name) == "board" && i+1 < len(blocks) {
+		if b.hdr && b.typ == 3 && trimName(b.name) == "core" && i+1 < len(blocks) {
 			boardData, boardAddr = blocks[i+1].data, b.start
 		}
 	}
@@ -64,6 +64,14 @@ func TestBalatrocReorderPlus2(t *testing.T) {
 	for i, v := range boardData {
 		emu.mem.Write(boardAddr+uint16(i), v)
 	}
+	balRingPreload(t, emu, tapRaw)
+	// ring BASIC-state law: RAMTOP $BFFB, SP just under it, ints off for
+	// direct-call stepping. Without this the BOOT-time BASIC stack sits in
+	// screen RAM and owned_card's frames push/pop pixels = runaway sled.
+	emu.mem.Write(0x5CB2, 0xFB)
+	emu.mem.Write(0x5CB3, 0xBF)
+	emu.cpu.SP = 0xBFF5
+	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
 	call1 := func(fn uint16, a byte) {
@@ -76,6 +84,9 @@ func TestBalatrocReorderPlus2(t *testing.T) {
 		emu.cpu.SP -= 2
 		emu.mem.Write(emu.cpu.SP, byte(sent))
 		emu.mem.Write(emu.cpu.SP+1, byte(sent>>8))
+		if fn >= 0xC000 {
+			balBankSel(t, emu, 1) // owned_card/shop live in PAGE SHOP
+		}
 		emu.cpu.PC = fn
 		g := 0
 		for emu.cpu.PC != sent && emu.cpu.PC != sent+1 {
@@ -87,7 +98,7 @@ func TestBalatrocReorderPlus2(t *testing.T) {
 	}
 	// owned row: two jokers, very different tag lengths (4 vs 6 chars)
 	jok := syms["jok"]
-	emu.mem.Write(jok, 19) // STCK
+	emu.mem.Write(jok, 19)   // STCK
 	emu.mem.Write(jok+1, 15) // DECKIE
 	// capture slot 0 column bytes bx=1..6, rows 136..175
 	bx := 1
@@ -101,16 +112,19 @@ func TestBalatrocReorderPlus2(t *testing.T) {
 		}
 		return out
 	}
+	balBankSel(t, emu, 1)
 	call1(syms["owned_card"], 0)
 	pX := cap0()
 	// swap occupants and repaint slot 0 (now DECKIE)
 	emu.mem.Write(jok, 15)
 	emu.mem.Write(jok+1, 19)
+	balBankSel(t, emu, 1)
 	call1(syms["owned_card"], 0)
 	pY := cap0()
 	// swap back — repaint must be byte-identical to pX (no residue)
 	emu.mem.Write(jok, 19)
 	emu.mem.Write(jok+1, 15)
+	balBankSel(t, emu, 1)
 	call1(syms["owned_card"], 0)
 	pX2 := cap0()
 	diff := 0
@@ -150,4 +164,5 @@ func bytesEq(a, b []byte) bool {
 		}
 	}
 	return true
+
 }

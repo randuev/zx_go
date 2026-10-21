@@ -48,7 +48,7 @@ func TestBalatrocStatsOverlayPlus2(t *testing.T) {
 	var boardAddr uint16
 	for i := range blocks {
 		b := blocks[i]
-		if b.hdr && b.typ == 3 && trimName(b.name) == "board" && i+1 < len(blocks) {
+		if b.hdr && b.typ == 3 && trimName(b.name) == "core" && i+1 < len(blocks) {
 			boardData, boardAddr = blocks[i+1].data, b.start
 		}
 	}
@@ -77,6 +77,7 @@ func TestBalatrocStatsOverlayPlus2(t *testing.T) {
 	for i, v := range boardData {
 		emu.mem.Write(boardAddr+uint16(i), v)
 	}
+	balRingPreload(t, emu, tapRaw)
 	stroke := func(row byte, bit byte, tail int) {
 		emu.kbd.PressMatrixKey(int(row), bit, true)
 		runF(4)
@@ -105,13 +106,13 @@ func TestBalatrocStatsOverlayPlus2(t *testing.T) {
 	// boot the GAME: main() -> title -> '0' -> board
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
-	emu.cpu.SP = 0xFF56
-	emu.mem.Write(0xFF56, byte(sent))
-	emu.mem.Write(0xFF57, byte(sent>>8))
+	emu.cpu.SP = 0xBFF5
+	emu.mem.Write(0xBFF5, byte(sent))
+	emu.mem.Write(0xBFF6, byte(sent>>8))
 	emu.cpu.PC = boardAddr
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
-	runF(150) // title settles
+	runF(150)            // title settles
 	stroke(4, 0x01, 120) // '0' = START -> board
 	if emu.cpu.PC == sent || emu.cpu.PC == sent+1 {
 		t.Fatalf("game halted at sentinel before board: PC=$%04X", emu.cpu.PC)
@@ -147,22 +148,36 @@ func TestBalatrocStatsOverlayPlus2(t *testing.T) {
 	if ghost > 0 {
 		t.Errorf("overlay did not clear b2 SCORE NEEDED area (%d px)", ghost)
 	}
-	// card truth: ghosts == _top
+	// card truth (REBASELINED PASS 51/55 law): dealt/used cards are PLAIN
+	// empty white space — no gray holes, no bright bit (PASS 55: "the dark
+	// cell was a black hole"). Ghost = a 16x16 cell with ZERO lit pixels
+	// and plain white-paper attr; ghost count == _top (cards already left
+	// the deck). Old gate expected attr==0x40 gray holes at y104 — stale.
 	top := int(emu.mem.Read(syms["top"]))
-	gray := byte(0x40)
 	gc := 0
 	for s := 0; s < 4; s++ {
-		row0 := (104 + s * 16) / 8
+		y0 := 120 + s*16
 		for k := 0; k < 13; k++ {
-			a := attr(row0, 2+k*2)
-			if a == gray {
+			cx := 16 + k*16
+			litCell := 0
+			for y := y0; y < y0+16; y++ {
+				for bx := cx / 8; bx < cx/8+2; bx++ {
+					a := uint16(0x4000 + ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + bx)
+					if emu.mem.Read(a) != 0 {
+						litCell++
+					}
+				}
+			}
+			if litCell == 0 && attr(y0/8, cx/8) == 0x38 {
+				// plain white paper, black ink, NOT bright — PASS 55 law:
+				// ghost cells carry no dark hole and no blazing bit
 				gc++
 			}
 		}
 	}
-	fmt.Printf("STATS: grayCells=%d _top=%d\n", gc, top)
+	fmt.Printf("STATS: blankGhostCells=%d _top=%d\n", gc, top)
 	if gc != top {
-		t.Errorf("gray ghost cells %d want _top=%d", gc, top)
+		t.Errorf("blank ghost cells %d want _top=%d", gc, top)
 	}
 	// close -> board restored
 	stroke(1, 0x04, 120)

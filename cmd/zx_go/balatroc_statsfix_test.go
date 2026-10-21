@@ -50,7 +50,7 @@ func balStatsFixSetup(t *testing.T) (*emulator, uint16, map[string]uint16) {
 	var boardAddr uint16
 	for i := range blocks {
 		b := blocks[i]
-		if b.hdr && b.typ == 3 && trimName(b.name) == "board" && i+1 < len(blocks) {
+		if b.hdr && b.typ == 3 && trimName(b.name) == "core" && i+1 < len(blocks) {
 			boardData, boardAddr = blocks[i+1].data, b.start
 		}
 	}
@@ -71,11 +71,12 @@ func balStatsFixSetup(t *testing.T) (*emulator, uint16, map[string]uint16) {
 	for i, v := range boardData {
 		emu.mem.Write(boardAddr+uint16(i), v)
 	}
+balRingPreload(t, emu, tapRaw)
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
-	emu.cpu.SP = 0xFF56
-	emu.mem.Write(0xFF56, byte(sent))
-	emu.mem.Write(0xFF57, byte(sent>>8))
+	emu.cpu.SP = 0xBFF5
+	emu.mem.Write(0xBFF5, byte(sent))
+	emu.mem.Write(0xBFF6, byte(sent>>8))
 	emu.cpu.PC = boardAddr
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
@@ -222,6 +223,7 @@ func TestBalatrocDealFlickPlus2(t *testing.T) {
 	emu.cpu.SP -= 2
 	emu.mem.Write(emu.cpu.SP, byte(sent))
 	emu.mem.Write(emu.cpu.SP+1, byte(sent>>8))
+	balBankSel(t, emu, 0)
 	emu.cpu.PC = syms["paint_hand"]
 	g := 0
 	for emu.cpu.PC != sent && emu.cpu.PC != sent+1 {

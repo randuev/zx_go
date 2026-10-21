@@ -37,7 +37,7 @@ func TestBalatrocAnte5WinPlus2(t *testing.T) {
 	var bd, md []byte
 	for i := range blocks {
 		b := blocks[i]
-		if b.hdr && b.typ == 3 && trimName(b.name) == "board" && i+1 < len(blocks) {
+		if b.hdr && b.typ == 3 && trimName(b.name) == "core" && i+1 < len(blocks) {
 			a, bd = b.start, blocks[i+1].data
 		}
 		if b.hdr && b.typ == 3 && trimName(b.name) == "music" && i+1 < len(blocks) {
@@ -82,11 +82,14 @@ func TestBalatrocAnte5WinPlus2(t *testing.T) {
 			emu.mem.Write(0x6000+uint16(i), v)
 		}
 	}
+	// PASS 56 RING: preload pages through the MMU window (door law)
+	balRingPreload(t, emu, tapRaw)
+
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
-	emu.cpu.SP = 0xFF56
-	emu.mem.Write(0xFF56, byte(sent))
-	emu.mem.Write(0xFF57, byte(sent>>8))
+	emu.cpu.SP = 0xBFF5
+	emu.mem.Write(0xBFF5, byte(sent))
+	emu.mem.Write(0xBFF6, byte(sent>>8))
 	emu.cpu.PC = 0x8000 // crt0 — the ONLY honest door
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
@@ -101,10 +104,78 @@ func TestBalatrocAnte5WinPlus2(t *testing.T) {
 		emu.kbd.PressMatrixKey(int(row), bit, false)
 		runF(tail)
 	}
-	runF(160) // crt0 -> music_boot -> title poll
+	spW := emu.cpu.SP
+	for i := 0; i < 160; i++ {
+		runOneFrameHeadless(emu, roms.ModelPlus2)
+		if emu.cpu.SP != spW {
+			// single-step back is not possible; instead hunt for LD SP,HL ($F9)
+			// and LD SP,(nn) ($ED $7B) in the resident code block
+			for j := uint16(0x8000); j < 0x8600; j++ {
+				if emu.mem.Read(j) == 0xF9 {
+					fmt.Printf("LD SP,HL @$%04X (ctx:", j)
+					for k := j - 6; k < j+2; k++ {
+						fmt.Printf(" %02X", emu.mem.Read(k))
+					}
+					fmt.Printf(")\n")
+				}
+				if emu.mem.Read(j) == 0xED && emu.mem.Read(j+1) == 0x7B {
+					nn := uint16(emu.mem.Read(j+2)) | uint16(emu.mem.Read(j+3))<<8
+					fmt.Printf("LD SP,($%04X) @self=$%04X value=$%04X\n", nn, j, uint16(emu.mem.Read(nn))|uint16(emu.mem.Read(nn+1))<<8)
+				}
+			}
+			break
+		}
+	}
+	fmt.Printf("BOOT witness: PC=$%04X SP=$%04X IM=%d @8000=$%02X ante=$%02X qctr=%d\n",
+		emu.cpu.PC, emu.cpu.SP, emu.cpu.IM, emu.mem.Read(0x8000), emu.mem.Read(ante), int(rd16(balSym("qctr"))))
 	stroke(4, 0x01, 200) // START -> game_new -> round 1
+	ring := make([]uint16, 0, 8192)
+	type pcs struct{ p, s uint16 }
+	ring2 := make([]pcs, 0, 200000)
 	for rnd := 0; rnd < 40 && emu.mem.Read(ante) < 5; rnd++ {
-		runF(140) // deal poll settle
+		crashed := false
+		for i := 0; i < 140 && !crashed; i++ {
+			for j := 0; j < 70000; j++ {
+				emu.cpu.StepInstructionWithIRQ()
+				ring = append(ring, emu.cpu.PC)
+				ring2 = append(ring2, pcs{emu.cpu.PC, emu.cpu.SP})
+				if len(ring2) > 200000 {
+					ring2 = ring2[len(ring2)-200000:]
+				}
+				if len(ring) > 8192 {
+					ring = ring[len(ring)-8192:]
+				}
+				if emu.cpu.PC < 0x8000 && emu.cpu.PC != 0x7D00 {
+					crashed = true
+					break
+				}
+			}
+		}
+		if crashed {
+			fmt.Printf("RING CRASH rnd=%d PC=$%04X SP=$%04X bank=$%02X flow=$%02X tail:\n",
+				rnd, emu.cpu.PC, emu.cpu.SP,
+				emu.mem.Read(balSym("bankbyte")), emu.mem.Read(balSym("flow")))
+			for _, p := range ring[len(ring)-48:] {
+				fmt.Printf(" %04X", p)
+			}
+			// find where SP starts its terminal descent
+			fmt.Printf("\nSINK SCAN (first pc where SP<0xBF00 sustained):")
+			for k := len(ring2) - 1; k > 0; k-- {
+				if ring2[k].s >= 0xBF00 && ring2[k-1].s < 0xBF00 {
+					lo := k - 6
+					if lo < 0 {
+						lo = 0
+					}
+					for _, e := range ring2[lo : k+1] {
+						fmt.Printf(" %04X/$%04X", e.p, e.s)
+					}
+					break
+				}
+			}
+			fmt.Printf("\n")
+			fmt.Printf("\n")
+			break
+		}
 		wu32(tgt, 1) // any scoring hand beats this round
 		stroke(4, 0x08, 60) // SEL a card
 		stroke(4, 0x01, 700) // PLAY -> score_anim -> wait_key

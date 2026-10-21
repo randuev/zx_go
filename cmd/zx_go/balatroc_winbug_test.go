@@ -30,7 +30,7 @@ func TestBalatrocWinBugPlus2(t *testing.T) {
 	var boardData, musicData []byte
 	for i := range blocks {
 		b := blocks[i]
-		if b.hdr && b.typ == 3 && trimName(b.name) == "board" && i+1 < len(blocks) {
+		if b.hdr && b.typ == 3 && trimName(b.name) == "core" && i+1 < len(blocks) {
 			boardAddr, boardData = b.start, blocks[i+1].data
 		}
 		if b.hdr && b.typ == 3 && trimName(b.name) == "music" && i+1 < len(blocks) {
@@ -81,14 +81,15 @@ func TestBalatrocWinBugPlus2(t *testing.T) {
 	for i, v := range boardData {
 		emu.mem.Write(boardAddr+uint16(i), v)
 	}
+balRingPreload(t, emu, tapRaw)
 	for i, v := range musicData {
 		emu.mem.Write(0x6000+uint16(i), v)
 	}
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
-	emu.cpu.SP = 0xFF56
-	emu.mem.Write(0xFF56, byte(sent))
-	emu.mem.Write(0xFF57, byte(sent>>8))
+	emu.cpu.SP = 0xBFF5
+	emu.mem.Write(0xBFF5, byte(sent))
+	emu.mem.Write(0xBFF6, byte(sent>>8))
 	emu.cpu.PC = boardAddr
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1

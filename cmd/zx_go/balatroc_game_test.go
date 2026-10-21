@@ -78,19 +78,29 @@ func TestBalatrocGameMusicPlus2(t *testing.T) {
 	blocks := balParseTapBlocks(t, tapRaw)
 	var boardAddr uint16
 	var boardData, musicData []byte
+	pageData := map[string][]byte{}
 	for i := range blocks {
 		b := blocks[i]
-		if b.hdr && b.typ == 3 && strings.TrimRight(b.name, " ") == "board" && i+1 < len(blocks) {
-			boardAddr, boardData = b.start, blocks[i+1].data
+		if !b.hdr || b.typ != 3 || i+1 >= len(blocks) {
+			continue
 		}
-		if b.hdr && b.typ == 3 && strings.TrimRight(b.name, " ") == "music" && i+1 < len(blocks) {
+		switch strings.TrimRight(b.name, " .") {
+		case "core": // pass-56 RING resident (was 'board')
+			boardAddr, boardData = b.start, blocks[i+1].data
+		case "page_game":
+			pageData["game"] = blocks[i+1].data
+		case "page_shop":
+			pageData["shop"] = blocks[i+1].data
+		case "music":
 			musicData = blocks[i+1].data
 		}
 	}
-	// pass-48: bulba retired — the AY player is EMBEDDED in the board block;
-	// there is no second CODE block any more. Only board must exist.
+	// PASS 56 RING: resident 'core' @$8000 (fixed banks {4,5}) + two
+	// $C000 pages pre-loaded straight into PHYSICAL banks — page GAME
+	// -> banks {0,1} (OUT 32765,0), page SHOP -> banks {2,3} (OUT 32765,1).
+	// The game's own bank_set then walks the MMU; the harness never pages.
 	if boardData == nil {
-		t.Fatal("board CODE block missing")
+		t.Fatal("core CODE block missing")
 	}
 
 	prev := cliFlagsActive
@@ -116,6 +126,29 @@ func TestBalatrocGameMusicPlus2(t *testing.T) {
 	for i, v := range boardData {
 		emu.mem.Write(boardAddr+uint16(i), v)
 	}
+balRingPreload(t, emu, tapRaw)
+	// PASS 56 RING: pages load straight into PHYSICAL banks (the MMU does
+	// not map them right now). page GAME -> banks {0,1} (OUT 32765,0),
+	// page SHOP -> banks {2,3} (OUT 32765,1). The game's bank_set walks
+	// the MMU afterwards; the harness itself never pages.
+	for _, pg := range []struct {
+		name string
+		bank int
+	}{{"game", 0}, {"shop", 1}} { // OUT page p -> banks {2p,2p+1}
+		d := pageData[pg.name]
+		if d == nil {
+			t.Fatalf("page %s CODE block missing", pg.name)
+		}
+		// Write THROUGH the MMU: select page, then write the logical
+		// $C000 window. RAM8KPage speaks NEXT bank ids — the +2 classic
+		// OUT-p window is NOT banks {p,p+1} in that index space. Logical
+		// writes land in whatever banks the hardware actually maps.
+		balBankSel(t, emu, uint8(pg.bank)) // bank here = OUT page
+		for i, v := range d {
+			emu.mem.Write(0xC000+uint16(i), v)
+		}
+		_ = balRingBankOf // keep bank tag meaningful for diagnostics
+	}
 	_ = musicData // pass-48: unused — no $6000 PT3 stage any more
 	if emu.mem.Read(0x8000) == 0 {
 		t.Fatal("board not loaded")
@@ -127,10 +160,10 @@ func TestBalatrocGameMusicPlus2(t *testing.T) {
 	// module at $6000-$6F47, zeroed it and ret-popped garbage to ROM.
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
-	emu.cpu.SP = 0xFF57
-	emu.mem.Write(0xFF56, byte(sent))
-	emu.mem.Write(0xFF57, byte(sent>>8))
-	emu.cpu.SP = 0xFF56
+	emu.cpu.SP = 0xBFF6
+	emu.mem.Write(0xBFF5, byte(sent))
+	emu.mem.Write(0xBFF6, byte(sent>>8))
+	emu.cpu.SP = 0xBFF5
 	emu.cpu.PC = boardAddr
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
@@ -197,4 +230,55 @@ func TestBalatrocGameMusicPlus2(t *testing.T) {
 	}
 	fmt.Printf("BALATROC: frames=%d quarks=%d qpf=%.2f sfxID=%d PC=$%04X\n",
 		frames, quarks, float64(quarks)/float64(frames), emu.mem.Read(sfxID), emu.cpu.PC)
+}
+
+// balRingPreload loads the pass-56 RING page blocks ($C000 windows) straight
+// into PHYSICAL banks: page GAME -> banks {0,1}, page SHOP -> banks {2,3}.
+// The game's bank_set (OUT 32765,p) then walks the MMU itself.
+func balRingPreload(t *testing.T, emu *emulator, tapRaw []byte) {
+	t.Helper()
+	blocks := balParseTapBlocks(t, tapRaw)
+	want := map[string]int{"page_game": 0, "page_shop": 1} // OUT pages
+	for i := range blocks {
+		b := blocks[i]
+		bank, ok := want[trimName(b.name)]
+		if !b.hdr || b.typ != 3 || !ok || i+1 >= len(blocks) {
+			continue
+		}
+		d := blocks[i+1].data
+		balBankSel(t, emu, uint8(bank))
+		for j, v := range d {
+			emu.mem.Write(0xC000+uint16(j), v)
+		}
+		if os.Getenv("PRELOAD") != "" {
+			t.Logf("preloaded %s OUT%d: win[0..3]=%02X %02X %02X %02X len=%d",
+				trimName(b.name), bank, emu.mem.Read(0xC000), emu.mem.Read(0xC001),
+				emu.mem.Read(0xC002), emu.mem.Read(0xC003), len(d))
+		}
+	}
+	balBankSel(t, emu, 2) // park core page: banks {4,5}
+}
+
+// balRingBankOf tags which OUT-page a page-name maps to (diagnostics).
+var balRingBankOf = map[string]byte{"page_game": 0, "page_shop": 1} // OUT pages
+
+// balBankSel performs a HARDWARE-true page select: an OUT trampoline in
+// fixed memory ($7D10): LD A,page / LD BC,$7FFD / OUT (C),A / JP back.
+// After it returns the $C000 window shows page banks {2n, 2n+1}. bit 5 of
+// the paging value is NEVER set (would LOCK the +2 — cruxay law).
+func balBankSel(t *testing.T, emu *emulator, page byte) {
+	t.Helper()
+	pc := emu.cpu.PC
+	tr := []byte{0x3E, page, 0x01, 0xFD, 0x7F, 0xED, 0x79, 0xC3, byte(pc), byte(pc >> 8)}
+	for i, b := range tr {
+		emu.mem.Write(0x7D10+uint16(i), b)
+	}
+	emu.cpu.PC = 0x7D10
+	for i := 0; i < 8; i++ {
+		emu.cpu.StepInstructionWithIRQ()
+		if emu.cpu.PC == pc {
+			return
+		}
+	}
+	t.Fatalf("balBankSel: trampoline did not return pc=$%04X", emu.cpu.PC)
 }

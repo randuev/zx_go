@@ -62,6 +62,7 @@ func TestBalatrocSplashPlus2(t *testing.T) {
 	emu.cpu.SP -= 2
 	emu.mem.Write(emu.cpu.SP, byte(sent))
 	emu.mem.Write(emu.cpu.SP+1, byte(sent>>8))
+	balBankSel(t, emu, 1)
 	emu.cpu.PC = syms["boss_splash"]
 	g := 0
 	for emu.cpu.PC != sent && emu.cpu.PC != sent+1 {
@@ -102,6 +103,7 @@ func TestBalatrocSplashPlus2(t *testing.T) {
 	emu.cpu.SP -= 2
 	emu.mem.Write(emu.cpu.SP, byte(sent))
 	emu.mem.Write(emu.cpu.SP+1, byte(sent>>8))
+	balBankSel(t, emu, 1)
 	emu.cpu.PC = syms["boss_splash"]
 	g = 0
 	for emu.cpu.PC != sent && emu.cpu.PC != sent+1 {
@@ -123,6 +125,7 @@ func TestBalatrocSplashPlus2(t *testing.T) {
 	// ambient cue: the NEXT board repaint (paint_stage latch) must re-latch
 	// RED while the boss blind is live. The sentinel HALT paints nothing, so
 	// drive draw_board directly — that is the every-repaint law.
+	balBankSel(t, emu, 0)
 	balCallNoArg(t, emu, syms["draw_board"])
 	fmt.Printf("SPLASH ambient border after board repaint: %d\n",
 		emu.ula.BorderColour&0x07)

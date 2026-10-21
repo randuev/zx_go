@@ -33,7 +33,7 @@ func TestBalatrocRunPlateProbe(t *testing.T) {
 	var boardAddr uint16
 	for i := range blocks {
 		b := blocks[i]
-		if b.hdr && b.typ == 3 && trimName(b.name) == "board" && i+1 < len(blocks) {
+		if b.hdr && b.typ == 3 && trimName(b.name) == "core" && i+1 < len(blocks) {
 			boardData, boardAddr = blocks[i+1].data, b.start
 		}
 	}
@@ -59,6 +59,7 @@ func TestBalatrocRunPlateProbe(t *testing.T) {
 	for i, v := range boardData {
 		emu.mem.Write(boardAddr+uint16(i), v)
 	}
+balRingPreload(t, emu, tapRaw)
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
 	jumpA := func(fn uint16, a byte) {
@@ -88,6 +89,7 @@ func TestBalatrocRunPlateProbe(t *testing.T) {
 	emu.mem.Write(syms["top"], 17)
 	wr("jok", 0, 3)
 	wr("jok", 1, 7)
+	balBankSel(t, emu, 1)
 	jumpA(syms["run_screen"], 1)
 	runF(240) // ~4 s of plate incl. sfx fanfare pumps
 	if emu.cpu.PC != sent && emu.cpu.PC != sent+1 {
@@ -119,6 +121,7 @@ func TestBalatrocRunPlateProbe(t *testing.T) {
 	// one after paint so the function exits cleanly.
 	emu.mem.Write(syms["run_best_ht"], 0)
 	emu.mem.Write(syms["top"], 41)
+	balBankSel(t, emu, 1)
 	jumpA(syms["run_screen"], 0)
 	runF(240)
 	head = lit(40, 71, 10, 25)

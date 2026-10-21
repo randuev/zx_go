@@ -32,7 +32,7 @@ func TestBalatrocMutePlus2(t *testing.T) {
 	var bd []byte
 	for i := range blocks {
 		b := blocks[i]
-		if b.hdr && b.typ == 3 && trimName(b.name) == "board" && i+1 < len(blocks) {
+		if b.hdr && b.typ == 3 && trimName(b.name) == "core" && i+1 < len(blocks) {
 			a, bd = b.start, blocks[i+1].data
 		}
 	}
@@ -55,9 +55,9 @@ func TestBalatrocMutePlus2(t *testing.T) {
 	}
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
-	emu.cpu.SP = 0xFF56
-	emu.mem.Write(0xFF56, byte(sent))
-	emu.mem.Write(0xFF57, byte(sent>>8))
+	emu.cpu.SP = 0xBFF5
+	emu.mem.Write(0xBFF5, byte(sent))
+	emu.mem.Write(0xBFF6, byte(sent>>8))
 	emu.cpu.PC = 0x8000 // crt0 — the honest entry (title polls keys)
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1

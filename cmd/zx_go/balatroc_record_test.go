@@ -39,7 +39,7 @@ func TestBalatrocIdleTempoPlus2(t *testing.T) {
 	var bd []byte
 	for i := range blocks {
 		b := blocks[i]
-		if b.hdr && b.typ == 3 && trimName(b.name) == "board" && i+1 < len(blocks) {
+		if b.hdr && b.typ == 3 && trimName(b.name) == "core" && i+1 < len(blocks) {
 			a, bd = b.start, blocks[i+1].data
 		}
 	}
@@ -56,7 +56,7 @@ func TestBalatrocIdleTempoPlus2(t *testing.T) {
 	for i, v := range bd { emu.mem.Write(a+uint16(i), v) }
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
-	emu.cpu.SP = 0xFFFE
+	emu.cpu.SP = 0xBFFE
 	emu.mem.Write(0xFFFC, byte(sent))
 	emu.mem.Write(0xFFFD, byte(sent>>8))
 	emu.cpu.PC = 0x8000
@@ -84,7 +84,7 @@ func TestBalatrocRecordSoundsPlus2(t *testing.T) {
 	var bd, md []byte
 	for i := range blocks {
 		b := blocks[i]
-		if b.hdr && b.typ == 3 && trimName(b.name) == "board" && i+1 < len(blocks) {
+		if b.hdr && b.typ == 3 && trimName(b.name) == "core" && i+1 < len(blocks) {
 			a, bd = b.start, blocks[i+1].data
 		}
 		if b.hdr && b.typ == 3 && trimName(b.name) == "music" && i+1 < len(blocks) {
@@ -121,7 +121,7 @@ func TestBalatrocRecordSoundsPlus2(t *testing.T) {
 	}
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
-	emu.cpu.SP = 0xFFFE
+	emu.cpu.SP = 0xBFFE
 	emu.mem.Write(0xFFFC, byte(sent))
 	emu.mem.Write(0xFFFD, byte(sent>>8))
 	emu.cpu.PC = 0x8000 // CRT cold start — the true RANDOMIZE USR contract

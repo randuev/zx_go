@@ -24,7 +24,7 @@ func TestBalatrocBoot48fPlus2(t *testing.T) {
 	var bd, md []byte
 	for i := range blocks {
 		b := blocks[i]
-		if b.hdr && b.typ == 3 && trimName(b.name) == "board" && i+1 < len(blocks) {
+		if b.hdr && b.typ == 3 && trimName(b.name) == "core" && i+1 < len(blocks) {
 			a, bd = b.start, blocks[i+1].data
 		}
 		if b.hdr && b.typ == 3 && trimName(b.name) == "music" && i+1 < len(blocks) {
@@ -65,11 +65,31 @@ func TestBalatrocBoot48fPlus2(t *testing.T) {
 	fmt.Printf("at music_boot: %02X %02X %02X %02X %02X\n",
 		emu.mem.Read(musicBoot), emu.mem.Read(musicBoot+1), emu.mem.Read(musicBoot+2),
 		emu.mem.Read(musicBoot+3), emu.mem.Read(musicBoot+4))
+	// PASS 56 RING: preload pages through the MMU window (door law)
+	balRingPreload(t, emu, tapRaw)
+
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
-	emu.cpu.SP = 0xFF56
-	emu.mem.Write(0xFF56, byte(sent))
-	emu.mem.Write(0xFF57, byte(sent>>8))
+	emu.cpu.SP = 0xBFF5
+	emu.mem.Write(0xBFF5, byte(sent))
+	// ring crash witness: capture window map + stack at first ROM escape
+	{
+		bb := balSym("bankbyte")
+		flw := balSym("flow")
+		for f := 0; f < 3000; f++ {
+			runOneFrameHeadless(emu, roms.ModelPlus2)
+			if emu.cpu.PC < 0x8000 {
+				fmt.Printf("RING ESCAPE f=%d PC=$%04X SP=$%04X bankbyte=$%02X flow=$%02X stack:", f, emu.cpu.PC, emu.cpu.SP, emu.mem.Read(bb), emu.mem.Read(flw))
+				for k := uint16(0); k < 12; k++ {
+					fmt.Printf(" %02X", emu.mem.Read(emu.cpu.SP+k))
+				}
+				fmt.Printf("\n")
+				break
+			}
+		}
+	}
+
+	emu.mem.Write(0xBFF6, byte(sent>>8))
 	emu.cpu.PC = musicBoot
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
@@ -114,7 +134,7 @@ func TestBalatrocBoot48fPlus2(t *testing.T) {
 	// crt0 runs DI, sets the SDCC IY frame, SP, IM and CALLs _main, which
 	// calls _music_boot, paints the title, and runs the game forever.
 	emu.cpu.PC = 0x8000
-	emu.cpu.SP = 0xFF56
+	emu.cpu.SP = 0xBFF5
 	emu.cpu.Halted = false
 	runF := func(n int) {
 		for i := 0; i < n; i++ {
@@ -169,11 +189,48 @@ func TestBalatrocBoot48fPlus2(t *testing.T) {
 	emu.kbd.PressMatrixKey(4, 0x01, true)
 	runF(4)
 	emu.kbd.PressMatrixKey(4, 0x01, false)
+	stepPCs := make([]uint16, 0, 4000)
+	{
+		kc := 0
+		for len(stepPCs) < 4000 {
+			emu.cpu.StepInstructionWithIRQ()
+			kc++
+			if kc > 200000 {
+				break
+			}
+			stepPCs = append(stepPCs, emu.cpu.PC)
+			if emu.cpu.PC < 0x8000 {
+				break
+			}
+		}
+		if len(stepPCs) > 24 {
+			fmt.Printf("STEP TAIL:")
+			for _, p := range stepPCs[len(stepPCs)-24:] {
+				fmt.Printf(" %04X", p)
+			}
+			fmt.Printf(" SP=$%04X bank=$%02X flow=$%02X\n", emu.cpu.SP, emu.mem.Read(balSym("bankbyte")), emu.mem.Read(balSym("flow")))
+		}
+	}
+	pcs := make([]uint16, 0, 600)
 	for i := 0; i < 120; i++ {
 		runOneFrameHeadless(emu, roms.ModelPlus2)
+		pcs = append(pcs, emu.cpu.PC)
+		if len(pcs) > 600 {
+			pcs = pcs[len(pcs)-600:]
+		}
 		if emu.cpu.PC < 0x8000 {
-			fmt.Printf("GAME-ESCAPE f%d PC=$%04X SP=$%04X IM=%d IFF1=%v\n",
-				i, emu.cpu.PC, emu.cpu.SP, emu.cpu.IM, emu.cpu.IFF1)
+			fmt.Printf("TAIL:")
+			for _, p := range pcs {
+				fmt.Printf(" %04X", p)
+			}
+			fmt.Printf("\n")
+			fmt.Printf("GAME-ESCAPE f%d PC=$%04X SP=$%04X IM=%d IFF1=%v bankbyte=$%02X flow=$%02X stack:",
+				i, emu.cpu.PC, emu.cpu.SP, emu.cpu.IM, emu.cpu.IFF1,
+				emu.mem.Read(balSym("bankbyte")), emu.mem.Read(balSym("flow")))
+			for k := uint16(0); k < 14; k++ {
+				fmt.Printf(" %02X", emu.mem.Read(emu.cpu.SP+k))
+			}
+			fmt.Printf("\n")
 			break
 		}
 	}

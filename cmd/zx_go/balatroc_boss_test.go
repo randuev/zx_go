@@ -42,7 +42,7 @@ func balBossSetup(t *testing.T) (*emulator, map[string]uint16) {
 	var boardAddr uint16
 	for i := range blocks {
 		b := blocks[i]
-		if b.hdr && b.typ == 3 && trimName(b.name) == "board" && i+1 < len(blocks) {
+		if b.hdr && b.typ == 3 && trimName(b.name) == "core" && i+1 < len(blocks) {
 			boardData, boardAddr = blocks[i+1].data, b.start
 		}
 	}
@@ -63,11 +63,12 @@ func balBossSetup(t *testing.T) (*emulator, map[string]uint16) {
 	for i, v := range boardData {
 		emu.mem.Write(boardAddr+uint16(i), v)
 	}
+balRingPreload(t, emu, tapRaw)
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
-	emu.cpu.SP = 0xFF56
-	emu.mem.Write(0xFF56, byte(sent))
-	emu.mem.Write(0xFF57, byte(sent>>8))
+	emu.cpu.SP = 0xBFF5
+	emu.mem.Write(0xBFF5, byte(sent))
+	emu.mem.Write(0xBFF6, byte(sent>>8))
 	emu.cpu.PC = boardAddr
 	emu.cpu.IFF1, emu.cpu.IFF2 = false, false
 	emu.cpu.IM = 1
@@ -77,6 +78,11 @@ func balBossSetup(t *testing.T) (*emulator, map[string]uint16) {
 func balCallNoArg(t *testing.T, emu *emulator, fn uint16) {
 	t.Helper()
 	sent := uint16(0x7D00)
+	// PASS 56 RING: window-addr targets live in PAGE GAME — hardware-select
+	// page 0 before PC lands in the bank, else the call runs $00 zeros.
+	if fn >= 0xC000 {
+		balBankSel(t, emu, 0)
+	}
 	emu.cpu.Halted = false
 	emu.cpu.SP -= 2
 	emu.mem.Write(emu.cpu.SP, byte(sent))
@@ -440,6 +446,7 @@ func TestBalatrocBossPanelPlus2(t *testing.T) {
 	// boss live: WINDOW on the line under "BOSS"
 	emu.mem.Write(syms["blind"], 2)
 	emu.mem.Write(syms["boss_id"], 6)
+	balBankSel(t, emu, 0)
 	balCallNoArg(t, emu, syms["draw_board"])
 	plate, ink := 0, bandInk(8, 15, 0, 10)
 	for c := 0; c <= 10; c++ {
@@ -458,6 +465,7 @@ func TestBalatrocBossPanelPlus2(t *testing.T) {
 	// no boss: line erased — plain panel paper, zero ink
 	emu.mem.Write(syms["blind"], 1)
 	emu.mem.Write(syms["boss_id"], 0)
+	balBankSel(t, emu, 0)
 	balCallNoArg(t, emu, syms["draw_board"])
 	run(2)
 	plain, inkOff := 0, bandInk(8, 15, 0, 10)

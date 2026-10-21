@@ -44,7 +44,7 @@ func TestBalatrocWinCheckPlus2(t *testing.T) {
 	var boardAddr uint16
 	for i := range blocks {
 		b := blocks[i]
-		if b.hdr && b.typ == 3 && trimName(b.name) == "board" && i+1 < len(blocks) {
+		if b.hdr && b.typ == 3 && trimName(b.name) == "core" && i+1 < len(blocks) {
 			boardData, boardAddr = blocks[i+1].data, b.start
 		}
 	}
@@ -65,6 +65,7 @@ func TestBalatrocWinCheckPlus2(t *testing.T) {
 	for i, v := range boardData {
 		emu.mem.Write(boardAddr+uint16(i), v)
 	}
+balRingPreload(t, emu, tapRaw)
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
 	rd32 := func(a uint16) uint32 {
@@ -89,10 +90,11 @@ func TestBalatrocWinCheckPlus2(t *testing.T) {
 	callCT() // idempotence: second call must NOT shrink tgt
 	t2 := rd32(syms["tgt"])
 	fmt.Printf("WINCHECK ante6-small: tgt=%d after2nd=%d\n", t1, t2)
-	if t1 != 90000 {
-		t.Errorf("tgt ante6-small=%d want 90000", t1)
+	// PASS 52 REAL-BALATRO curve rebaseline: ante6 small = 22500
+	if t1 != 22500 {
+		t.Errorf("tgt ante6-small=%d want 22500 (pass-52 curve)", t1)
 	}
-	if t2 != 90000 {
+	if t2 != 22500 {
 		t.Errorf("2nd call shrank tgt to %d — stringify eats tgt (pass-47 regression)", t2)
 	}
 	// score 1196 (photo) must NOT beat it; compare the real operands
@@ -114,7 +116,8 @@ func TestBalatrocWinCheckPlus2(t *testing.T) {
 	callCT()
 	t4 := rd32(syms["tgt"])
 	fmt.Printf("WINCHECK ante7-small: tgt=%d\n", t4)
-	if t4 != t3*2 {
-		t.Errorf("endless climb ante7-small=%d want %d", t4, t3*2)
+	// real ladder (pass 52): ante7 small = 37500 (SMALL[2]); boss=×2
+	if t4 != 37500 {
+		t.Errorf("endless climb ante7-small=%d want 37500 (pass-52 ladder)", t4)
 	}
 }
