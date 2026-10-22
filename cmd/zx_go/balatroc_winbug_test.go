@@ -27,14 +27,11 @@ func TestBalatrocWinBugPlus2(t *testing.T) {
 	}
 	blocks := balParseTapBlocks(t, tapRaw)
 	var boardAddr uint16
-	var boardData, musicData []byte
+	var boardData []byte
 	for i := range blocks {
 		b := blocks[i]
 		if b.hdr && b.typ == 3 && trimName(b.name) == "core" && i+1 < len(blocks) {
 			boardAddr, boardData = b.start, blocks[i+1].data
-		}
-		if b.hdr && b.typ == 3 && trimName(b.name) == "music" && i+1 < len(blocks) {
-			musicData = blocks[i+1].data
 		}
 	}
 	prev := cliFlagsActive
@@ -47,13 +44,18 @@ func TestBalatrocWinBugPlus2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newEmulator: %v", err)
 	}
-	const score = 0xFC37
-	const tgt = 0xF9FD
-	const msg = 0xFB89
-	const handsL = 0xF9F9
-	const ante = 0xF9FB
-	const blind = 0xFEE4
-	const STRWIN = 0xD8AB
+	// PASS 63 anti-drift law: EVERY global comes from board.map — the old
+	// hardcoded $FCxx/$FExx constants were pass-48-era window addresses that
+	// drifted silently, and a gate reading garbage "PASSes" by luck, not law.
+	score := balSym("score")
+	tgt := balSym("tgt")
+	msg := balSym("bmsg")
+	handsL := balSym("hands_l")
+	ante := balSym("ante")
+	blind := balSym("blind")
+	selected := balSym("selected")
+	cursor := balSym("cursor")
+	STRWIN := balSym("STR_WIN")
 	rd16 := func(a uint16) uint32 {
 		return uint32(emu.mem.Read(a)) | uint32(emu.mem.Read(a+1))<<8 |
 			uint32(emu.mem.Read(a+2))<<16 | uint32(emu.mem.Read(a+3))<<24
@@ -82,9 +84,8 @@ func TestBalatrocWinBugPlus2(t *testing.T) {
 		emu.mem.Write(boardAddr+uint16(i), v)
 	}
 balRingPreload(t, emu, tapRaw)
-	for i, v := range musicData {
-		emu.mem.Write(0x6000+uint16(i), v)
-	}
+	// (bulba retired pass 48+: the old $6000 music poke was DEAD CODE and
+	// painted garbage into display bank 5 — gone.)
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
 	emu.cpu.SP = 0xBFF5
@@ -105,7 +106,8 @@ balRingPreload(t, emu, tapRaw)
 		runF(tail)
 	}
 	runF(120) // title
-	stroke(4, 0x01, 150) // START -> first play screen
+	stroke(4, 0x01, 150) // START -> PASS 63: ANTE PREVIEW now opens first…
+	stroke(4, 0x01, 60)  // …any key dismisses it, then the round is ours
 	fmt.Printf("round start: score=%d tgt=%d ante=%d blind=%d hands_l=%d\n",
 		rd16(score), rd16(tgt), emu.mem.Read(ante), emu.mem.Read(blind), emu.mem.Read(handsL))
 	// force the reported state: BOSS target 90000, score stays whatever
@@ -127,18 +129,18 @@ balRingPreload(t, emu, tapRaw)
 	sel := func() string {
 		s := ""
 		for i := 0; i < 8; i++ {
-			s += fmt.Sprintf("%02X", emu.mem.Read(0xFECA+uint16(i)))
+			s += fmt.Sprintf("%02X", emu.mem.Read(selected+uint16(i)))
 		}
 		return s
 	}
 	for i := 0; i < 3; i++ {
 		stroke(4, 0x04, 40)
 		fmt.Printf("after RIGHT%d: cursor=%d msg=$%04X PC=$%04X\n",
-			i, emu.mem.Read(0xFEDB),
+			i, emu.mem.Read(cursor),
 			uint16(emu.mem.Read(msg))|uint16(emu.mem.Read(msg+1))<<8, emu.cpu.PC)
 	}
 	stroke(4, 0x08, 40) // exactly ONE SEL: cursor stays on a card
-	fmt.Printf("selected=%s cursor=%d\n", sel(), emu.mem.Read(0xFEDB))
+	fmt.Printf("selected=%s cursor=%d\n", sel(), emu.mem.Read(cursor))
 	scoreWr = scoreWr[:0] // ignore pre-play banks
 	// PLAY and watch the check region frame by frame
 	emu.kbd.PressMatrixKey(4, 0x01, true)

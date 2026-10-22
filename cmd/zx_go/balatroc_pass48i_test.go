@@ -88,6 +88,9 @@ func TestBalatrocPass48iPlus2(t *testing.T) {
 	rd := func(a uint16) byte { return emu.mem.Read(a) }
 	runF(160)
 	balStroke(emu, runF, 4, 0x01, 200) // START -> round 1 deal
+	// PASS 63: the ANTE PREVIEW (Seva) now opens after the title and eats
+	// one key — dismiss it, then the round owns the screen as before.
+	balStroke(emu, runF, 4, 0x01, 60)
 	runF(140)
 	if emu.cpu.PC < 0x8000 || emu.cpu.PC > 0xF000 {
 		t.Fatalf("not inside the game: PC=$%04X", emu.cpu.PC)

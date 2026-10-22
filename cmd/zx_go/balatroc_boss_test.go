@@ -133,6 +133,8 @@ func TestBalatrocBossCurvePlus2(t *testing.T) {
 		emu.mem.Write(syms["ante"], c.ante)
 		emu.mem.Write(syms["blind"], c.blind)
 		emu.mem.Write(syms["boss_id"], c.boss)
+		// PASS 63: WALL law reads the ANTE LOCK — drive it honestly.
+		emu.mem.Write(syms["ante_boss"], c.boss)
 		balCallNoArg(t, emu, syms["compute_target"])
 		got := rd32(emu, syms["tgt"])
 		if got != c.want {
@@ -165,14 +167,21 @@ func TestBalatrocBossRulesPlus2(t *testing.T) {
 	seen := map[uint8]int{}
 	rounds := 13
 	for r := 0; r < rounds; r++ {
-		// position at ante r+1 BIG blind so next_round wraps to BOSS
+		// position at ante r+1 BIG blind so next_round wraps to BOSS.
+		// PASS 63: the boss source is the ANTE LOCK (ante_boss) — drive it
+		// directly to probe each boss's rule, exactly once per round.
 		emu.mem.Write(syms["ante"], uint8(r+1))
 		emu.mem.Write(syms["blind"], 1)
+		bWant := uint8(r%10 + 1)
+		emu.mem.Write(syms["ante_boss"], bWant)
 		balCallNoArg(t, emu, syms["next_round"])
 		if emu.mem.Read(syms["blind"]) != 2 {
 			t.Fatalf("round %d: blind did not land on boss", r)
 		}
 		b := emu.mem.Read(syms["boss_id"])
+		if b != bWant {
+			t.Fatalf("round %d: boss_id=%d != ante-lock %d", r, b, bWant)
+		}
 		if b < 1 || b > 10 {
 			t.Fatalf("round %d: boss_id=%d out of pool", r, b)
 		}
@@ -210,9 +219,60 @@ func TestBalatrocBossRulesPlus2(t *testing.T) {
 			}
 		}
 		seen[b]++
-		if r < 10 && len(seen) != r+1 {
-			t.Errorf("round %d: boss repeat inside fresh pool (%v)", r, seen)
+		// PASS 63: pool no-repeat now lives at the WRAP (ante_boss picks) —
+		// probe it there, not by faking stacked boss blinds.
+	}
+	// PASS 63 WRAP-POOL PROBE: the pool law stated in its own truth —
+	// boss_used bits. Every wrap must mark its pick and touch nothing else;
+	// a pick whose bit was ALREADY set is legal only through the reshuffle
+	// door (before==0x3FF). 12 wraps must cover: drain of the nine remaining
+	// bits, the reshuffle, and one post-reshuffle pick. Preview (ante_new)
+	// is owed at every wrap.
+	seenWrap := map[uint8]int{}
+	bUsed := syms["boss_used"]
+	rdUsed := func() uint16 {
+		return uint16(emu.mem.Read(bUsed)) | uint16(emu.mem.Read(bUsed+1))<<8
+	}
+	ab0 := emu.mem.Read(syms["ante_boss"])
+	seenWrap[ab0]++
+	recycled := false
+	for w := 0; w < 12 && !recycled; w++ {
+		emu.mem.Write(syms["blind"], 2)
+		emu.mem.Write(syms["ante_new"], 0)
+		before := rdUsed()
+		balCallNoArg(t, emu, syms["next_round"])
+		if emu.mem.Read(syms["ante_new"]) != 1 {
+			t.Fatalf("wrap %d: ante_new=%d — preview never owed", w, emu.mem.Read(syms["ante_new"]))
 		}
+		ab := emu.mem.Read(syms["ante_boss"])
+		if ab < 1 || ab > 10 {
+			t.Fatalf("wrap %d: ante_boss=%d off pool", w, ab)
+		}
+		after := rdUsed()
+		bit := uint16(1 << uint(ab-1))
+		fmt.Printf("WRAPPOOL w%d pick=%d used %03X->%03X\n", w, ab, before, after)
+		switch {
+		case before == 0x3FF:
+			// reshuffle door: pool was full, engine cleared then marked —
+			if after != bit {
+				t.Fatalf("wrap %d: reshuffle marked %03X, want %03X", w, after, bit)
+			}
+			if seenWrap[ab] != 0 {
+				recycled = true
+			}
+		case after&^before != bit:
+			t.Fatalf("wrap %d: pick=%d mark wrong: used %03X->%03X", w, ab, before, after)
+		case before&bit != 0:
+			t.Fatalf("wrap %d: pick=%d from unmarked pool: used %03X->%03X", w, ab, before, after)
+		}
+		seenWrap[ab]++
+		if emu.mem.Read(syms["blind"]) != 0 {
+			t.Fatalf("wrap %d: blind=%d != 0 after wrap", w, emu.mem.Read(syms["blind"]))
+		}
+	}
+	fmt.Printf("WRAPPOOL distinct=%d/10 recycled=%v used=%03X\n", len(seenWrap), recycled, rdUsed())
+	if !recycled {
+		t.Fatal("12 wraps never exercised the reshuffle door — pool law unproven")
 	}
 	// THE HOOK direct-call: two unselected held cards vanish, no refill.
 	emu.mem.Write(syms["boss_id"], 5)

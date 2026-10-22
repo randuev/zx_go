@@ -136,9 +136,14 @@ func TestBalatrocRecordSoundsPlus2(t *testing.T) {
 		}
 	}
 	ph := func(tag string) {
-		qc := uint16(emu.mem.Read(0xFCD2)) | uint16(emu.mem.Read(0xFA2C))<<8
-		sc := int32(uint(emu.mem.Read(0xFC35)) | uint(emu.mem.Read(0xFEDE))<<8 |
-			uint(emu.mem.Read(0xFC37))<<16 | uint(emu.mem.Read(0xFEE0))<<24)
+		// PASS 63 anti-drift: honest map-sourced reads (the old
+		// byte-scattered $FCxx/$FExx combo was meaningless garbage).
+		qc := uint16(emu.mem.Read(balSym("qctr"))) |
+			uint16(emu.mem.Read(balSym("qctr")+1))<<8
+		sc := int32(uint32(emu.mem.Read(balSym("score"))) |
+			uint32(emu.mem.Read(balSym("score")+1))<<8 |
+			uint32(emu.mem.Read(balSym("score")+2))<<16 |
+			uint32(emu.mem.Read(balSym("score")+3))<<24)
 		fmt.Printf("PHASE %-22s PC=$%04X SP=$%04X halted=%v qctr=%d score=%d\n",
 			tag, emu.cpu.PC, emu.cpu.SP, emu.cpu.Halted, qc, sc)
 	}

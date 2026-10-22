@@ -111,6 +111,8 @@ func TestBalatrocCtl48hPlus2(t *testing.T) {
 	}
 	runF(160)                  // crt0 -> title poll
 	balStroke(emu, runF, 4, 0x01, 200) // 0 = START -> round 1 deals
+	// PASS 63: ANTE PREVIEW rides after the title — dismiss with any key.
+	balStroke(emu, runF, 4, 0x01, 60)
 	runF(140)
 	if emu.cpu.PC < 0x8000 || emu.cpu.PC > 0xF000 {
 		t.Fatalf("not inside the game after START: PC=$%04X", emu.cpu.PC)
