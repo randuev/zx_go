@@ -67,6 +67,11 @@ func TestBalatrocMusicPlus2(t *testing.T) {
 	for i, v := range bd {
 		emu.mem.Write(a+uint16(i), v)
 	}
+	// pass 61 ML page boot: preload banks so boot_pages' idempotency gate
+	// skips all LD-BYTES calls — without banks loaded (and no tape mounted
+	// here) boot_pages would wait for tape edges in the real ROM loader
+	// forever. Doors land match the tap -> zero deck traffic, straight on.
+	balRingPreload(t, emu, tapRaw)
 	sent := uint16(0x7D00)
 	emu.mem.Write(sent, 0x76)
 	emu.cpu.SP = 0xBFFE
