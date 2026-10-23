@@ -120,7 +120,9 @@ func TestBalatrocTarotPlus2(t *testing.T) {
 	for i := 0; i < 4; i++ {
 		stroke(K_T, B_T, 30)
 	}
-	if rd(tray) != 8 || rd(tray+1) != 8 || rd(tarID) != 9 || rd16(bank) != frozenBank {
+	// tray[0] is whatever the roll offered first (shape law asserted below);
+	// the FULL law is: tray stuck, stock intact, bank frozen.
+	if rd(tray+1) != 8 || rd(tarID) != 9 || rd16(bank) != frozenBank {
 		t.Fatalf("tray-FULL law broken: tray=%d,%d tar_id=%d bank=%d frozen=%d",
 			rd(tray), rd(tray+1), rd(tarID), rd16(bank), frozenBank)
 	}

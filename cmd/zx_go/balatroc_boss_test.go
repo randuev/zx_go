@@ -78,12 +78,15 @@ balRingPreload(t, emu, tapRaw)
 func balCallNoArg(t *testing.T, emu *emulator, fn uint16) {
 	t.Helper()
 	sent := uint16(0x7D00)
+	// PASS 65: clear Halted BEFORE the bank-select trampoline — a prior
+	// sentinel park leaves the core re-executing its HALT and the
+	// trampoline never steps.
+	emu.cpu.Halted = false
 	// PASS 56 RING: window-addr targets live in PAGE GAME — hardware-select
 	// page 0 before PC lands in the bank, else the call runs $00 zeros.
 	if fn >= 0xC000 {
 		balBankSel(t, emu, 0)
 	}
-	emu.cpu.Halted = false
 	emu.cpu.SP -= 2
 	emu.mem.Write(emu.cpu.SP, byte(sent))
 	emu.mem.Write(emu.cpu.SP+1, byte(sent>>8))
@@ -539,7 +542,7 @@ func TestBalatrocBossPanelPlus2(t *testing.T) {
 		t.Errorf("panel line not erased: plain=%d/11 ink=%d", plain, inkOff)
 	}
 	// deck stat grid: bright bit must be gone everywhere; ♦/♥ ink red
-	balCallNoArg(t, emu, syms["paint_stats"])
+	balCallNoArg(t, emu, balPageSym("paint_stats")) // PASS 65: stats is PAGE code now
 	bright, badInk := 0, 0
 	for row := 15; row <= 22; row++ {
 		for c := 2; c <= 27; c++ {

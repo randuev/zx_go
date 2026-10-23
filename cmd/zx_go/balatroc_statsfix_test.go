@@ -102,10 +102,24 @@ func TestBalatrocStatsFixPlus2(t *testing.T) {
 		balRunF(t, emu, tail)
 	}
 	balRunF(t, emu, 150)
-	stroke(4, 0x01, 120) // START
-	stroke(1, 0x04, 120) // D — open stats
+	// PASS 65 knock law (dbg-door proven): START enters the round only at
+	// the poll edge; re-knock until flow leaves TITLE(5), then re-knock D
+	// until the overlay latches. A single stroke lands in the splash-eat
+	// window and the census then samples the BOARD — the old flakes.
+	for k := 0; k < 40; k++ {
+		stroke(4, 0x01, 80)
+		if emu.mem.Read(syms["flow"]) == 0 {
+			break
+		}
+	}
+	for k := 0; k < 40; k++ {
+		stroke(1, 0x04, 80)
+		if emu.mem.Read(syms["g_stats"]) == 1 {
+			break
+		}
+	}
 	if emu.mem.Read(syms["g_stats"]) != 1 {
-		t.Fatalf("stats did not open (g_stats=0)")
+		t.Fatalf("stats did not open (g_stats=0 flow=%d)", emu.mem.Read(syms["flow"]))
 	}
 	pa := func(y, bx int) uint16 {
 		return uint16(0x4000 + ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + bx)
@@ -127,6 +141,15 @@ func TestBalatrocStatsFixPlus2(t *testing.T) {
 		}
 	}
 	fmt.Printf("STATSFIX gapPx=%d gridPx=%d\n", oldBand, newGrid)
+	savePNGAtomic("/tmp/statsfix_fail.png", emu.lastFrame())
+	for y := 104; y < 120; y++ {
+		for bx := 0; bx < 32; bx++ {
+			if v := emu.mem.Read(pa(y, bx)); v != 0 {
+				fmt.Printf("GAP y%d c%d=%02X ", y, bx, v)
+			}
+		}
+	}
+	fmt.Println()
 	if oldBand != 0 {
 		t.Errorf("gap band b13..b14 not empty: %d lit bytes", oldBand)
 	}
@@ -193,7 +216,17 @@ func TestBalatrocDealFlickPlus2(t *testing.T) {
 	emu.kbd.PressMatrixKey(4, 0x01, true)
 	balRunF(t, emu, 4)
 	emu.kbd.PressMatrixKey(4, 0x01, false)
-	balRunF(t, emu, 240) // START + full deal animation
+	// PASS 65 knock law: START enters the round only at the poll edge.
+	for k := 0; k < 40; k++ {
+		emu.kbd.PressMatrixKey(4, 0x01, true)
+		balRunF(t, emu, 4)
+		emu.kbd.PressMatrixKey(4, 0x01, false)
+		balRunF(t, emu, 60)
+		if emu.mem.Read(syms["flow"]) == 0 {
+			break
+		}
+	}
+	balRunF(t, emu, 240) // full deal animation
 	if emu.mem.Read(syms["deal_upto"]) != 8 {
 		t.Fatalf("deal did not finish: deal_upto=%d PC=$%04X",
 			emu.mem.Read(syms["deal_upto"]), emu.cpu.PC)

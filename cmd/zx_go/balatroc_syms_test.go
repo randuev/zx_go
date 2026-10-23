@@ -41,3 +41,33 @@ func balSym(name string) uint16 {
 	}
 	return v
 }
+
+/* PASS 65: paint_stats and its tables moved OFF core onto the PAGES
+ * (stack-room law). balPageSym resolves PAGE GAME local symbols from
+ * build/page_game.map; the caller must have bank 0 windowed at $C000
+ * before calling one. */
+var (
+	balPageMapOnce sync.Once
+	balPageMap     map[string]uint16
+)
+
+func balPageSym(name string) uint16 {
+	balPageMapOnce.Do(func() {
+		balPageMap = map[string]uint16{}
+		raw, err := os.ReadFile("/root/nerve-workspace/demos/balatroc-c/build/page_game.map")
+		if err != nil {
+			panic(fmt.Sprintf("balPageSym: no page_game.map: %v", err))
+		}
+		re := regexp.MustCompile(`_(\w+)\s+=\s+\$([0-9A-Fa-f]{4})`)
+		for _, m := range re.FindAllStringSubmatch(string(raw), -1) {
+			var v uint64
+			fmt.Sscanf(m[2], "%x", &v)
+			balPageMap[m[1]] = uint16(v)
+		}
+	})
+	v, ok := balPageMap[name]
+	if !ok {
+		panic(fmt.Sprintf("balPageSym: symbol %q not in page_game.map", name))
+	}
+	return v
+}

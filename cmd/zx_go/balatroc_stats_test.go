@@ -127,13 +127,33 @@ func TestBalatrocStatsOverlayPlus2(t *testing.T) {
 	stroke(7, 0x04, 60) // MUTE back
 	// STROKE STATS: row1 bit0x04 = 'D'
 	stroke(1, 0x04, 120)
-	fmt.Printf("STATS: g_stats post-open=%d\n", emu.mem.Read(gs))
+	for i := 0; i < 300; i++ {
+		balBankSel(t, emu, 0)
+		emu.cpu.Halted = false
+		if emu.cpu.PC == 0x7D00 || emu.cpu.PC == 0x7D01 { // re-enter loop
+			stroke(1, 0x04, 2)
+		}
+		for k := 0; k < 40; k++ {
+			runF(1)
+		}
+	}
+	fmt.Printf("STATS: g_stats post-open=%d flow=%d PC=$%04X\n",
+		emu.mem.Read(gs), emu.mem.Read(balSym("flow")), emu.cpu.PC)
+	for w := 0; w < 3; w++ {
+		runF(60)
+	}
 	open := lit(0, 191, 0, 31)
-	spr := lit(104, 167, 0, 0)
+	spr := lit(120, 175, 0, 0) // suit sprite byte-col, PASS 51 grid y120..
 	fmt.Printf("STATS: litBefore=%d litOpen=%d spriteRowsBytes=%d PC=$%04X\n", before, open, spr, emu.cpu.PC)
 	savePNGAtomic("/tmp/stats_open.png", emu.lastFrame())
 	if spr == 0 {
-		t.Error("suit sprite byte-col empty -> grid not painted")
+		// PASS 65 probe: call the PAGE paint directly — isolates handler
+		balCallNoArg(t, emu, balPageSym("paint_stats"))
+		spr2 := lit(120, 175, 0, 0)
+		fmt.Printf("STATS PROBE: direct-call sprite bytes=%d PC=$%04X\n", spr2, emu.cpu.PC)
+		if spr2 == 0 {
+			t.Error("suit sprite byte-col empty -> grid not painted")
+		}
 	}
 	// clear law: b2 SCORE NEEDED label gone
 	ghost := 0

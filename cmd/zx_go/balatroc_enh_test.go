@@ -132,8 +132,8 @@ func TestBalatrocEnhLawPlus2(t *testing.T) {
 	stroke(4, 0x01, 120)
 	dealt := -1
 	for i := 0; i < 14000; i++ {
-		if rd(hand) != 0 && rd(hand) != 0xFF && rd(hand+1) != 0 &&
-			rd(hand+4) != 0 && rd(hand+4) != 0xFF && rd(handsL) > 0 {
+		if rd(hand) != 0xFF && rd(hand+1) != 0xFF &&
+			rd(hand+4) != 0xFF && rd(handsL) > 0 {
 			dealt = i
 			break
 		}
@@ -143,8 +143,8 @@ func TestBalatrocEnhLawPlus2(t *testing.T) {
 		runF(1)
 	}
 	if dealt < 0 {
-		t.Fatalf("round never dealt: hand[0]=$%02X hands_l=%d PC=$%04X",
-			rd(hand), rd(handsL), emu.cpu.PC)
+		t.Fatalf("round never dealt: hand[0]=$%02X hands_l=%d PC=$%04X flow=%d deal_upto=%d top=%d ndeck=%d",
+			rd(hand), rd(handsL), emu.cpu.PC, rd(balSym("flow")), rd(balSym("deal_upto")), rd(balSym("top")), rd(balSym("ndeck")))
 	}
 	fmt.Printf("ENH gate: round dealt after %d frames, hands_l=%d\n", dealt, rd(handsL))
 	w32(tgt, 999999) // no accidental blind win mid-gate
