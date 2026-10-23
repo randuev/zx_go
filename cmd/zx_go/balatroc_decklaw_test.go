@@ -131,5 +131,6 @@ func TestBalatrocDeckLawPlus2(t *testing.T) {
 	if rd(ndeck) != 52 || rd(alive) != 1 || rd(alive+26) != 1 {
 		t.Errorf("cards lost: ndeck=%d alive0=%d alive26=%d", rd(ndeck), rd(alive), rd(alive+26))
 	}
+	savePNGAtomic("/tmp/decklaw.png", emu.renderFrame())
 	fmt.Println("PASS DECKLAW: faces counted, duplicates badged, refaced moved, nothing lost")
 }
