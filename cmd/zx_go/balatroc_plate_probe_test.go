@@ -91,6 +91,20 @@ balRingPreload(t, emu, tapRaw)
 	wr("jok", 1, 7)
 	balBankSel(t, emu, 1)
 	jumpA(syms["run_screen"], 1)
+	// TEMP TRACE: find where the jump escapes into ROM
+	for i := 0; i < 60000; i++ {
+		pcB := emu.cpu.PC
+		emu.cpu.StepInstructionWithIRQ()
+		if emu.cpu.PC < 0x8000 && pcB >= 0x8000 {
+			fmt.Printf("TRACE escape: fromPC=$%04X -> $%04X (insn idx %d)\n",
+				pcB, emu.cpu.PC, i)
+			break
+		}
+		if emu.cpu.PC == sent || emu.cpu.Halted {
+			fmt.Printf("TRACE parked at $%04X i=%d\n", emu.cpu.PC, i)
+			break
+		}
+	}
 	runF(240) // ~4 s of plate incl. sfx fanfare pumps
 	if emu.cpu.PC != sent && emu.cpu.PC != sent+1 {
 		t.Logf("plate win did not park on sentinel yet: PC=$%04X", emu.cpu.PC)
@@ -117,6 +131,34 @@ balRingPreload(t, emu, tapRaw)
 	if rows == 0 {
 		t.Error("win plate stats rows empty")
 	}
+	// PASS 67 (Seva: "win screen has red colour only on portion of big
+	// letters"): text12 pitch is 24 px = 3 attr cells per glyph; the old
+	// attrrect covered only the middle 14 cols. Exact span law — the
+	// big-letter attr (ink CYAN for WIN / RED for OVER on black paper)
+	// must cover EVERY cell the doubled text lands on: "YOU WIN!"
+	// (8 glyphs @ x=32): px 32..223 -> attr cols 4..27; "GAME OVER"
+	// (9 @ x=20): px 20..235 -> cols 2..29. Cell just OUTSIDE must not
+	// carry the ink.
+	inkOf := func(row, col int) int {
+		return int(emu.mem.Read(uint16(0x5800+row*32+col)) & 7)
+	}
+	spanCheck := func(tag string, rows []int, c0, c1, ink int) {
+		for _, r := range rows {
+			for c := c0; c <= c1; c++ {
+				if inkOf(r, c) != ink {
+					t.Errorf("%s: attr r%d c%d ink=%d want %d — big-letter colour span short",
+						tag, r, c, inkOf(r, c), ink)
+					return
+				}
+			}
+			if inkOf(r, c1+1) == ink {
+				t.Errorf("%s: attr r%d c%d bleeds ink %d past span", tag, r, c1+1, ink)
+			}
+		}
+	}
+	spanCheck("WIN", []int{6, 7}, 4, 27, 5) // CYAN ink (=5)
+	fmt.Printf("PLATE win attr ink: r6c3=%d r6c4=%d r6c27=%d r6c28=%d\n",
+		inkOf(6, 3), inkOf(6, 4), inkOf(6, 27), inkOf(6, 28))
 	// OVER plate: wipe, wait_key returns instantly if a key is down — tap
 	// one after paint so the function exits cleanly.
 	emu.mem.Write(syms["run_best_ht"], 0)
@@ -126,6 +168,9 @@ balRingPreload(t, emu, tapRaw)
 	runF(240)
 	head = lit(40, 71, 10, 25)
 	fmt.Printf("PLATE over: headPxBytes=%d PC=$%04X\n", head, emu.cpu.PC)
+	spanCheck("OVER", []int{6, 7}, 2, 29, 2) // RED ink (=2)
+	fmt.Printf("PLATE over attr ink: r6c1=%d r6c2=%d r6c29=%d r6c30=%d\n",
+		inkOf(6, 1), inkOf(6, 2), inkOf(6, 29), inkOf(6, 30))
 	savePNGAtomic("/tmp/plate_over.png", emu.lastFrame())
 
 	// RAM headline census: ink columns must separate chars at pitch 24

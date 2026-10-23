@@ -151,14 +151,105 @@ func TestBalatrocEnhLawPlus2(t *testing.T) {
 			rd(hand), rd(handsL), emu.cpu.PC, rd(balSym("flow")), rd(balSym("deal_upto")), rd(balSym("top")), rd(balSym("ndeck")))
 	}
 	fmt.Printf("ENH gate: round dealt after %d frames, hands_l=%d\n", dealt, rd(handsL))
+	// PASS 67 BADGE law v2 (Seva "all badges at the same time"):
+	// DIRECT-PAINT census. The live score path puts the calculator's
+	// number row on the SAME bytes as the badge rows — pixel census
+	// there is a coin flip. Instead call the resident painter
+	// card_cell($9F2F, sdcc_iy: args on stack, sentinel RET) into a
+	// cleared scratch and demand EXACTLY ONE badge glyph: the badge
+	// (6px at x+2) lives entirely in byte col bxc bits 5..0; byte col
+	// bxc+1 must be ZERO (glyph6 spills px8+ only past a 6px glyph),
+	// and bxc+2 may carry only the frame's right-edge bit0.
+	{
+		cc := balSym("card_cell")
+		if cc == 0 || cc >= 0xC000 {
+			t.Fatalf("card_cell not resident: $%04X", cc)
+		}
+		// capture live-loop state; RESTORE it after the census so the
+		// round loop below keeps running exactly where it was
+		sp0, pc0, im0 := emu.cpu.SP, emu.cpu.PC, emu.cpu.IM
+		ifff0 := emu.cpu.IFF1
+		eb := balSym("enh") // rodata neighbour probe: print ENHBADGE raw
+		_ = eb
+		var ebRaw [12]byte
+		for i := range ebRaw {
+			ebRaw[i] = emu.mem.Read(uint16(0xAA92) + uint16(i))
+		}
+		fmt.Printf("ENHBADGE@AA92 raw: %q core[0..3]=%02X%02X%02X%02X\n",
+			string(ebRaw[:]), emu.mem.Read(0x8000), emu.mem.Read(0x8001),
+			emu.mem.Read(0x8002), emu.mem.Read(0x8003))
+		pa := func(y, bx int) byte {
+			return emu.mem.Read(uint16(0x4000 + ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + bx))
+		}
+		for e := 0; e <= 7; e++ {
+			x := 96
+			y0 := 9 * 8
+			// clear the cell span first
+			for y := y0; y <= y0+39; y++ {
+				for bx := 12; bx <= 15; bx++ {
+					emu.mem.Write(uint16(0x4000+((y&7)<<8)+((y&0x38)<<2)+(bx)), 0x00)
+				}
+			}
+			emu.cpu.Halted = false
+			emu.cpu.IFF1 = false // diagnostics: no IRQ stack traffic mid-paint
+			balBankSel(t, emu, 2)
+			base := uint16(0xBF00)
+			vals := []uint16{0x7D00, 9, uint16(x), 24, 24, 0, 1, 0, uint16(e)}
+			for k, v := range vals {
+				emu.mem.Write(base+uint16(2*k), byte(v))
+				emu.mem.Write(base+uint16(2*k+1), byte(v>>8))
+			}
+			emu.cpu.SP = base
+			emu.cpu.PC = cc
+			g := 0
+			for emu.cpu.PC != 0x7D00 {
+				emu.cpu.StepInstructionWithIRQ()
+				if g++; g > 2_000_000 {
+					t.Fatalf("card_cell runaway (enh=%d)", e)
+				}
+			}
+			fmt.Printf("  direct e=%d steps=%d PC=%04X SP=%04X\n", e, g, emu.cpu.PC, emu.cpu.SP)
+			var after [12]byte
+			for i := range after {
+				after[i] = emu.mem.Read(uint16(0xAA92) + uint16(i))
+			}
+			fmt.Printf("  ENHBADGE after call: %q\n", string(after[:]))
+			for y := y0; y <= y0+39; y++ {
+				fmt.Printf("   y%d: c12=%02X c13=%02X c14=%02X\n", y, pa(y, 12), pa(y, 13), pa(y, 14))
+			}
+			badge, mid, right := 0, 0, 0
+			for y := y0 + 32; y <= y0 + 38; y++ {
+				badge += int(pa(y, 12) & 0x3F)
+				mid += int(pa(y, 13))
+				right += int(pa(y, 14) & 0xFE)
+			}
+			// (e<6 overflow diagnostics dumped above by the y-walk prints)
+			if e >= 1 && e <= 6 {
+				if badge == 0 {
+					t.Errorf("enh=%d: badge glyph missing at bottom-left", e)
+				}
+				if mid != 0 || right != 0 {
+					t.Errorf("enh=%d: ENHBADGE OVERFLOW — badge painted cols 13/14 (mid=%d right=%d): one glyph must fit byte col 12", e, mid, right)
+				}
+			} else if badge != 0 || mid != 0 || right != 0 {
+				t.Errorf("enh=%d: NO badge expected outside 1..6 — cols dirty", e)
+			}
+		}
+		savePNGAtomic("/tmp/enh_badge_direct.png", emu.renderFrame())
+		// RESTORE the live round loop (bank 0 = PAGE GAME, IM2, IFF1)
+		balBankSel(t, emu, 0)
+		emu.cpu.SP, emu.cpu.PC, emu.cpu.IM = sp0, pc0, im0
+		emu.cpu.IFF1 = ifff0
+		emu.cpu.Halted = false
+	}
+
+	// live scoring law below (unchanged): PLAY commits the exact score.
 	w32(tgt, 999999) // no accidental blind win mid-gate
 	w(handsL, 5)
 
 	// clear all enhancements, then set a known 5-card hand.
 	// cards[i] = card value, enh[i] = ENH_* code, marks all 5 played.
-	var lastCards, lastEnhs []byte
 	set := func(cards []byte, enhs []byte, bossDSuit byte) {
-		lastCards, lastEnhs = cards, enhs
 		for i := 0; i < 52; i++ {
 			w(enh+uint16(i), 0)
 		}
@@ -225,42 +316,10 @@ func TestBalatrocEnhLawPlus2(t *testing.T) {
 			t.Fatalf("law %s: score=%d want %d PC=$%04X handsL=%d play0=%d htype=%d lastN=%d hand=%v",
 				name, rd32(score), exp, emu.cpu.PC, rd(handsL), rd(playA), rd(htype), rd(lastN), hb)
 		}
-		// PASS 66 BADGE law (Seva): enh badge is the card's BOTTOM-LEFT
-		// corner (x+2, y0+32) — always visible while the card scores.
-		// Let score_anim finish RAISE/DROP (the row stays painted until
-		// clear_play), then census each enhanced card's bottom byte col.
-		runF(120)
-		pa := func(y, bx int) byte {
-			return emu.mem.Read(uint16(0x4000 + ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + bx))
-		}
-		badgePx := 0
-		anyEnh := false
-		for _, e := range lastEnhs {
-			if e != 0 {
-				anyEnh = true
-			}
-		}
-		for i := range lastEnhs {
-			if lastEnhs[i] == 0 || i >= len(lastCards) {
-				continue
-			}
-			bxc := 12 + 4*i // play card i: x=(12+4i)*8, 24px wide
-			lit := 0
-			for y := 104; y <= 110; y++ { // standing y0=72, badge rows +32..+38
-				lit += int(pa(y, bxc) & 0x3F) // pixels x+2..7, frame edge masked
-			}
-			fmt.Printf("  badge %s slot%d enh%d bytecol%d lit=%d\n", name, i, lastEnhs[i], bxc, lit)
-			if lit == 0 {
-				t.Errorf("law %s: enh badge missing at bottom-left of scored card slot %d", name, i)
-			}
-			badgePx++
-		}
-		if anyEnh && badgePx == 0 {
-			t.Errorf("law %s: no enhanced card in this case — badge census vacuous", name)
-		}
-		if anyEnh {
-			savePNGAtomic("/tmp/enh_badge_"+name+".png", emu.renderFrame())
-		}
+		// PASS 67: live badge pixel census REMOVED — the calculator's
+		// number row lives on these same bytes mid-score, so a pixel
+		// census here is a coin flip (pass-66 false PASS was noise).
+		// The DIRECT-PAINT census is the badge law now.
 		cleared := false
 		for i := 0; i < 20000; i++ {
 			runF(1)

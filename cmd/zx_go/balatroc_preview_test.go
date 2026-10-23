@@ -191,15 +191,33 @@ func TestBalatrocPreviewPlus2(t *testing.T) {
 		t.Fatal("PC never entered the $C000 window — door never ran")
 	}
 	lit := balLitCount(emu)
+	// PASS 67 (Seva: "when ante is previewed red background bleeds onto
+	// the next line to the beginning"): attr rows are 32 cells; the old
+	// attrrect(9,7,1,26,...) wrote col 32 == row 10 col 0. Exact-span
+	// law: RED paper covers EXACTLY cols 7..31 of row 9, and the very
+	// next byte — row 10 col 0 — must be clean.
 	red := balAttrRowPred(emu, 9, func(v uint8) bool { return (v>>3)&7 == 2 })
 	yel := balAttrRowPred(emu, 13, func(v uint8) bool { return v&7 == 6 })
-	fmt.Printf("PREVIEW lit=%d (before %d) redRow9=%d (before %d) yelRow13=%d qctrOK=%v\n",
-		lit, litBefore, red, redBefore, yel, poked)
+	spanBad := 0
+	for c := 7; c <= 31; c++ {
+		if (emu.mem.Read(uint16(0x5800+9*32+c))>>3)&7 != 2 {
+			spanBad++
+		}
+	}
+	bleed := (emu.mem.Read(uint16(0x5800+10*32+0)) >> 3) & 7
+	fmt.Printf("PREVIEW lit=%d (before %d) redRow9=%d (before %d) spanBad=%d bleedRow10Col0paper=%d yelRow13=%d qctrOK=%v\n",
+		lit, litBefore, red, redBefore, spanBad, bleed, yel, poked)
 	if redBefore > 2 {
 		t.Fatalf("attr row 9 already RED (%d) before preview — control broken", redBefore)
 	}
 	if red < 24 {
 		t.Errorf("boss row missing: only %d RED cells on row 9", red)
+	}
+	if spanBad != 0 {
+		t.Errorf("PASS 67 RED span broken: %d cells of cols 7..31 not RED", spanBad)
+	}
+	if bleed == 2 {
+		t.Errorf("PASS 67 RED BLEED: row 10 col 0 paper is RED — attr wrote past col 31")
 	}
 	if yel < 20 {
 		t.Errorf("rule row missing: only %d YELLOW-ink cells on row 13", yel)
