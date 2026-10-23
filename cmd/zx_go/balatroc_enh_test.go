@@ -270,6 +270,8 @@ func TestBalatrocEnhLawPlus2(t *testing.T) {
 	// stone scores +50 -> (5 + 3 + 150) * 1 = 158
 	set([]byte{13, 14, 44, 45, 46}, []byte{0, 0, 4, 4, 4}, 0xFF)
 	law(t, "STONE high", 158)
+	runF(90)
+	savePNGAtomic("/tmp/enh_stone.png", emu.renderFrame())
 
 	fmt.Println("PASS ENH LAW: BONUS +30 / MULT +4 / GLASS x2 / STONE +50-exempt / WILD flush — all exact")
 }

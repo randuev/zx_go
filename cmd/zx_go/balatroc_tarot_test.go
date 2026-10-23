@@ -106,6 +106,8 @@ func TestBalatrocTarotPlus2(t *testing.T) {
 		t.Fatalf("stock not sold after buy: tar_id=%d", rd(tarID))
 	}
 	fmt.Printf("BUY law: tray[0]=%d bank 99->%d stock sold OK\n", rd(tray), rd16(bank))
+	runF(90) // shop repaint lands with the banner
+	savePNGAtomic("/tmp/tarot_shop.png", emu.renderFrame())
 
 	// fill tray, then FULL refusal: stock survives, bank frozen
 	w(tarID, 8)
@@ -343,6 +345,7 @@ search:
 		t.Fatalf("HANGED MAN left no hole: hand[0]=%d", rd(hand))
 	}
 	fmt.Printf("HANGED MAN law: card %d graved, ndeck %d->%d exact OK\n", victim, nd0, rd(ndeck))
+	savePNGAtomic("/tmp/tarot_hanged.png", emu.renderFrame())
 
 	fmt.Println("PASS TAROT: shop buy/full/short/reroll + round picker wrong-count/exact/gravest — all exact")
 }
