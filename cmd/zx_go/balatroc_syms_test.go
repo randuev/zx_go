@@ -20,7 +20,11 @@ var (
 func balSyms() map[string]uint16 {
 	balMapOnce.Do(func() {
 		balMap = map[string]uint16{}
-		raw, err := os.ReadFile("/root/nerve-workspace/demos/balatroc-c/build/board.map")
+		path := os.Getenv("ZX_MAP")
+		if path == "" {
+			path = "/root/nerve-workspace/demos/balatroc-c/build/board.map"
+		}
+		raw, err := os.ReadFile(path)
 		if err != nil {
 			panic(fmt.Sprintf("balSyms: no board.map: %v", err))
 		}

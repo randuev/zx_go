@@ -29,7 +29,11 @@ func TestBalatrocEnhLawPlus2(t *testing.T) {
 	if os.Getenv("ENH") == "" {
 		t.Skip("set ENH=1")
 	}
-	tapRaw, err := os.ReadFile("/root/nerve-workspace/demos/balatroc-c/build/board.tap")
+	tapPath := os.Getenv("ZX_TAP")
+	if tapPath == "" {
+		tapPath = "/root/nerve-workspace/demos/balatroc-c/build/board.tap"
+	}
+	tapRaw, err := os.ReadFile(tapPath)
 	if err != nil {
 		t.Skipf("no balatroc tap: %v", err)
 	}
@@ -152,7 +156,9 @@ func TestBalatrocEnhLawPlus2(t *testing.T) {
 
 	// clear all enhancements, then set a known 5-card hand.
 	// cards[i] = card value, enh[i] = ENH_* code, marks all 5 played.
+	var lastCards, lastEnhs []byte
 	set := func(cards []byte, enhs []byte, bossDSuit byte) {
+		lastCards, lastEnhs = cards, enhs
 		for i := 0; i < 52; i++ {
 			w(enh+uint16(i), 0)
 		}
@@ -218,6 +224,42 @@ func TestBalatrocEnhLawPlus2(t *testing.T) {
 			}
 			t.Fatalf("law %s: score=%d want %d PC=$%04X handsL=%d play0=%d htype=%d lastN=%d hand=%v",
 				name, rd32(score), exp, emu.cpu.PC, rd(handsL), rd(playA), rd(htype), rd(lastN), hb)
+		}
+		// PASS 66 BADGE law (Seva): enh badge is the card's BOTTOM-LEFT
+		// corner (x+2, y0+32) — always visible while the card scores.
+		// Let score_anim finish RAISE/DROP (the row stays painted until
+		// clear_play), then census each enhanced card's bottom byte col.
+		runF(120)
+		pa := func(y, bx int) byte {
+			return emu.mem.Read(uint16(0x4000 + ((y & 7) << 8) + ((y & 0x38) << 2) + ((y & 0xC0) << 5) + bx))
+		}
+		badgePx := 0
+		anyEnh := false
+		for _, e := range lastEnhs {
+			if e != 0 {
+				anyEnh = true
+			}
+		}
+		for i := range lastEnhs {
+			if lastEnhs[i] == 0 || i >= len(lastCards) {
+				continue
+			}
+			bxc := 12 + 4*i // play card i: x=(12+4i)*8, 24px wide
+			lit := 0
+			for y := 104; y <= 110; y++ { // standing y0=72, badge rows +32..+38
+				lit += int(pa(y, bxc) & 0x3F) // pixels x+2..7, frame edge masked
+			}
+			fmt.Printf("  badge %s slot%d enh%d bytecol%d lit=%d\n", name, i, lastEnhs[i], bxc, lit)
+			if lit == 0 {
+				t.Errorf("law %s: enh badge missing at bottom-left of scored card slot %d", name, i)
+			}
+			badgePx++
+		}
+		if anyEnh && badgePx == 0 {
+			t.Errorf("law %s: no enhanced card in this case — badge census vacuous", name)
+		}
+		if anyEnh {
+			savePNGAtomic("/tmp/enh_badge_"+name+".png", emu.renderFrame())
 		}
 		cleared := false
 		for i := 0; i < 20000; i++ {
