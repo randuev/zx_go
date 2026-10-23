@@ -120,6 +120,14 @@ balRingPreload(t, emu, tapRaw)
 	minSP := uint16(0xFFFF)
 	for emu.cpu.Tstates() < target {
 		emu.cpu.StepInstructionWithIRQ()
+		// PASS 64: hammer 'T' (EV_USE — tarot buy/arm/refuse) alongside
+		// the held '0' so the new tarot paths run under the stack watchdog
+		n := len(ring)
+		if n%3000 < 8 {
+			emu.kbd.PressMatrixKey(2, 0x10, true)
+		} else {
+			emu.kbd.PressMatrixKey(2, 0x10, false)
+		}
 		ring = append(ring, rec{emu.cpu.PC, emu.cpu.SP})
 		if len(ring) > RING {
 			ring = ring[1:]

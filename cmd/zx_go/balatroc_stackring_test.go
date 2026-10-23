@@ -141,7 +141,7 @@ func TestBalatrocStackRing(t *testing.T) {
 			if dbg && i < 400 {
 				fmt.Printf("DBG %04d pc=%04X sp=%04X b=%02X %02X %02X a=%02X bc=%04X de=%04X hl=%04X ix=%04X\n",
 					i, emu.cpu.PC, emu.cpu.SP, emu.mem.Read(emu.cpu.PC), emu.mem.Read(emu.cpu.PC+1),
-					emu.mem.Read(emu.cpu.PC+2), emu.cpu.A, emu.cpu.B<<8|emu.cpu.C, emu.cpu.D<<8|emu.cpu.E,
+					emu.mem.Read(emu.cpu.PC+2), emu.cpu.A, uint16(emu.cpu.B)<<8|uint16(emu.cpu.C), uint16(emu.cpu.D)<<8|uint16(emu.cpu.E),
 					emu.cpu.HL(), emu.cpu.IX)
 			}
 			emu.cpu.StepInstructionWithIRQ()
