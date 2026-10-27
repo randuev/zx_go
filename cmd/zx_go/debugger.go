@@ -995,7 +995,7 @@ func (d *remoteDebugger) handleCommand(line string) string {
 	case "help", "?":
 		return "OK [step-back walks the recorded M1 ring: instant, registers only, NO memory. " +
 			"replay-back re-executes from a tt-on checkpoint: the whole machine, memory included.] " +
-			"pause set-pause-timeout break-on-sd continue step step-over step-back replay-back step-forward run-back to-present reverse-status get-registers get-stack backtrace history prev hot callgraph retgraph rstgraph get-memory hexdump read-memory write-memory set-breakpoint clear-breakpoint list-breakpoints bp-first-entry disassemble disasm-bank get-mmu get-divmmc nr-panel copper-disasm layer-state sprite-list palette-dump nextreg-read nextreg-write nr-snap nr-diff bank-peek bank-poke pool-scan load-bin list-banks watch-reg list-watches clear-watch watch-mem clear-watch-mem watch-read clear-watch-read watch-zero watch-port tp list-tp clear-tp nr-trace watch-nextreg trace-divmmc-ram trace-writes trace-nextreg-deltas irq-stats catch key snapshot-on-bp compare-foreign crash-detect tt-on tt-off tt-status tt-snap tt-rewind tt-find-pc tt-clear quit"
+			"pause set-pause-timeout break-on-sd continue step step-over step-back replay-back step-forward run-back to-present reverse-status get-registers get-stack backtrace history prev hot callgraph retgraph rstgraph get-memory hexdump read-memory write-memory set-breakpoint clear-breakpoint list-breakpoints bp-first-entry disassemble disasm-bank get-mmu get-divmmc nr-panel copper-disasm layer-state sprite-list palette-dump nextreg-read nextreg-write nr-snap nr-diff bank-peek bank-poke pool-scan load-bin list-banks watch-reg list-watches clear-watch watch-mem clear-watch-mem watch-read clear-watch-read watch-zero watch-port tp list-tp clear-tp tape nr-trace watch-nextreg trace-divmmc-ram trace-writes trace-nextreg-deltas irq-stats catch key snapshot-on-bp compare-foreign crash-detect tt-on tt-off tt-status tt-snap tt-rewind tt-find-pc tt-clear quit"
 	case "set-pause-timeout":
 		// Query form (no arg) reports the current value; otherwise set
 		// the pause-ack wait to N seconds. Used to await a `continue`
@@ -1262,6 +1262,8 @@ func (d *remoteDebugger) handleCommand(line string) string {
 		return d.cmdGraph(args, debugger.SourceRet, "RET")
 	case "rstgraph":
 		return d.cmdGraph(args, debugger.SourceRst, "RST")
+	case "tape":
+		return d.cmdTape(args)
 	case "quit", "exit":
 		return "OK bye"
 	}
@@ -1863,6 +1865,84 @@ func (d *remoteDebugger) cmdClearTp(args []string) string {
 		d.tpMap.Store(&next)
 	}
 	return fmt.Sprintf("OK removed tp @%s", annotateAddr(addr))
+}
+
+// cmdTape drives the physical tape deck live over telnet. Rationale: the
+// deck autoplays from load time and its EAR bit advances on every port-$FE
+// read — which includes the boot-menu keyboard scans. By the time a manually
+// armed LOAD (telnet `key enter`) starts hunting pilot, the deck has usually
+// spun to end-of-data and the ROM spins in its pilot-search loop forever.
+// These commands put the deck back under operator control so the native tape
+// path (Amstrad menu -> Tape Loader -> LOAD"" -> trap at $0556) can be
+// driven live alongside the debugger. Rewind/Seek stop playback by design
+// (tape.Rewind/SeekToBlock clear playing), so every move re-arms Play()
+// immediately; `pause` parks the deck where it is (loader auto-pause parity)
+// and `resume` restarts WITHOUT restarting the current block.
+func (d *remoteDebugger) cmdTape(args []string) string {
+	if d.emu == nil || d.emu.ula == nil {
+		return "ERR no ULA (tape unavailable)"
+	}
+	tp := d.emu.ula.GetTapePlayer()
+	if tp == nil {
+		return "ERR no tape loaded"
+	}
+	sub := "status"
+	if len(args) > 0 {
+		sub = strings.ToLower(args[0])
+	}
+	switch sub {
+	case "status":
+		return fmt.Sprintf("OK tape: playing=%v block=%d/%d more=%v",
+			tp.IsPlaying(), tp.CurrentBlock(), tp.BlockCount(), tp.HasMoreBlocks())
+	case "list":
+		var sb strings.Builder
+		sb.WriteString("OK blocks:")
+		for _, b := range tp.Blocks() {
+			title := ""
+			if b.Title != "" {
+				title = fmt.Sprintf(" \"%s\"", b.Title)
+			}
+			marker := ""
+			if b.Index == tp.CurrentBlock() {
+				marker = " <<"
+			}
+			fmt.Fprintf(&sb, " [%d %s%s len=%d flag=$%02X]%s", b.Index, b.Type, title, b.Length, b.FlagByte, marker)
+		}
+		return sb.String()
+	case "rewind":
+		tp.Rewind()
+		tp.Play()
+		return fmt.Sprintf("OK tape rewound to block 0 (%s), playing", tp.Blocks()[0].Type)
+	case "play":
+		tp.Play()
+		return fmt.Sprintf("OK tape playing block %d from its start", tp.CurrentBlock())
+	case "resume":
+		tp.Resume()
+		return "OK tape resumed (same position)"
+	case "pause", "stop":
+		tp.Stop()
+		return "OK tape stopped (position kept)"
+	case "goto", "seek":
+		if len(args) < 2 {
+			return "ERR usage: tape goto N"
+		}
+		n, err := strconv.Atoi(args[1])
+		if err != nil {
+			return "ERR " + err.Error()
+		}
+		tp.SeekToBlock(n)
+		tp.Play()
+		return fmt.Sprintf("OK tape at block %d, playing", tp.CurrentBlock())
+	case "next":
+		tp.SeekToBlock(tp.CurrentBlock() + 1)
+		tp.Play()
+		return fmt.Sprintf("OK tape at block %d, playing", tp.CurrentBlock())
+	case "prev":
+		tp.SeekToBlock(tp.CurrentBlock() - 1)
+		tp.Play()
+		return fmt.Sprintf("OK tape at block %d, playing", tp.CurrentBlock())
+	}
+	return "ERR usage: tape [status|list|rewind|play|pause|resume|goto N|next|prev]"
 }
 
 // sortUint16s sorts a slice of uint16 in ascending order.
